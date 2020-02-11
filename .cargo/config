@@ -1,0 +1,9 @@
+[build]
+target = "aarch64-unknown-none"
+# target = "armv7-none-eabi"
+
+[target.aarch64-unknown-none]
+linker = "aarch64-none-elf-gcc"
+
+[target.armv7a-none-eabi]
+linker = "arm-none-eabi-gcc"
