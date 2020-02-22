@@ -1,0 +1,76 @@
+#include "semihosting.h"
+
+.section ".text.boot"
+
+.globl semihosting_setup
+.globl semihosting_write_strz
+
+#ifdef ENABLE_SEMIHOSTING
+semihosting_param_block:
+    .space 32
+
+semihosting_tt_filename:
+    .asciz ":tt"
+
+semihosting_output_handle:
+    .space 4
+
+strlen:
+    // Takes a pointer to a null-terminated string in X0 and returns its length
+    // (not including the null terminator) in X0.
+    mov     x1, x0              // X1 contains pointer to string
+    mov     x0, #0              // X0 contains length
+1:  ldrb    w2, [x0, x2]
+    cmp     w0, 0
+    beq     2f
+    add     x0, x0, #1
+    b       1b
+2:  ret
+
+sys_open:
+    // Takes a pointer to a null-terminated string in X0 and a mode in X1,
+    // returning a non-zero handle in X0 on success, and -1 in X0 on failure.
+    strp    x0, x1, [sp, #-16]!
+    bl      strlen
+    mov     x3, [sp, 8]
+    mov     x4, [sp, 0]
+    mov     x5, x0
+    ldr     x0, =semihosting_param_block
+    // and     x2, x2, #0xFFFFFFFFFFFF
+    // and     x0, x0, #0xFFFFFFFFFFFF
+    // Parameter block structure:
+    //     filename: *const [u8; len + 1]
+    //     mode: u64
+    //     len: u64
+    strp    x3, x4, [x0]
+    str     x5, [x0]
+    mov     w0, #(SYS_OPEN)
+    hlt     #(SEMIHOSTING_HLT_PARAM)
+    add     sp, sp, #16
+    ret
+
+semihosting_setup:
+    // For semihosting, the operation is passed in W0, the parameter is passed
+    // in X1, and the return value is passed in X0.
+    ldr     x0, =semihosting_tt_filename
+    bl      sys_open
+    ldr     x1, =semihosting_output_handle
+    and     x1, x1, #0xFFFFFFFFFFFF
+    str     x0, [x1]
+    ret
+
+semihosting_write_strz:
+    // Takes a pointer to a null-terminated string in X0. Clobbers X0 and X1.
+    mov     x1, x0
+    and     x1, x1, #0xFFFFFFFFFFFF
+    mov     w0, #(SYS_WRITE0)
+    hlt     #(SEMIHOSTING_HLT_PARAM)
+    ret
+
+#else // ifdef ARM_SEMIHOSTING
+semihosting_setup:
+    ret
+
+semihosting_write_strz:
+    ret
+#endif // ifdef ARM_SEMIHOSTING

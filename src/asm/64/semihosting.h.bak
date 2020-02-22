@@ -1,0 +1,41 @@
+#define SEMIHOSTING_MAX_PARAMS  4
+
+#define SEMIHOSTING_HLT_PARAM   0xF000
+
+#define SYS_OPEN                0x01
+#define SYS_CLOSE               0x02
+#define SYS_WRITEC              0x03
+#define SYS_WRITE0              0x04
+#define SYS_WRITE               0x05
+#define SYS_READ                0x06
+#define SYS_READC               0x07
+#define SYS_ISERROR             0x08
+#define SYS_ISTTY               0x09
+#define SYS_SEEK                0x0A
+#define SYS_FLEN                0x0C
+#define SYS_TMPNAM              0x0D
+#define SYS_REMOVE              0x0E
+#define SYS_RENAME              0x0F
+#define SYS_CLOCK               0x10
+#define SYS_TIME                0x11
+#define SYS_SYSTEM              0x12
+#define SYS_ERRNO               0x13
+#define SYS_GET_CMDLINE         0x15
+#define SYS_HEAPINFO            0x16
+#define SYS_EXIT                0x18
+#define SYS_EXIT_EXTENDED       0x20
+#define SYS_ELAPSED             0x30
+#define SYS_TICKFREQ            0x31
+
+#define MODE_R         0
+#define MODE_R_B       1
+#define MODE_R_PLUS    2
+#define MODE_R_PLUS_B  3
+#define MODE_W         4
+#define MODE_W_B       5
+#define MODE_W_PLUS    6
+#define MODE_W_PLUS_B  7
+#define MODE_A         8
+#define MODE_A_B       9
+#define MODE_A_PLUS    10
+#define MODE_A_PLUS_B  11

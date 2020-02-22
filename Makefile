@@ -9,17 +9,49 @@ ifeq ($(origin .RECIPEPREFIX), undefined)
 endif
 .RECIPEPREFIX = >
 
-build: build/kernel8.img # build/kernel7.img
-.PHONY: build
+PI := 3
+
+ifeq (3, $(PI))
+  ARM_PREFIX = aarch64-none-elf
+  ARM_VERSION = 8
+  BIT_WIDTH = 64
+  RUST_TRIPLE = aarch64-unknown-none
+else ifeq (2, $(PI))
+  ARM_PREFIX = arm-none-eabi
+  ARM_VERSION = 7
+  BIT_WIDTH = 64
+  RUST_TRIPLE = armv7a-none-eabi
+else
+  $(error Variable PI must be either 2 or 3, found $(PI))
+endif
+
+RUST_OPT_LEVEL := release
+RUST_FEATURES := rpi$(PI)
+# enable semihosting
+RUST_FEATURES := $(RUST_FEATURES) semihosting
+
+ASM_FILES := $(wildcard src/asm/$(BIT_WIDTH)/*.S)
+OBJ_FILES := $(ASM_FILES:src/asm/$(BIT_WIDTH)/%.S=build/%_s.$(ARM_VERSION).o)
+
+# DWC_OTG_C_FILES := $(wildcard vendor/dwc_otg/*.c)
+# OBJ_FILES := $(OBJ_FILES) $(DWC_OTG_C_FILES:vendor/dwc_otg/%.c=build/dwc_otg__%.$(ARM_VERSION).o)
+
+DEP_FILES = $(OBJ_FILES:%.o=%.d)
+-include $(DEP_FILES)
+
+build: build/kernel$(ARM_VERSION).img
 
 emulate-rpi3: build/kernel8.img
-# > qemu-system-aarch64 -M raspi3 -kernel build/kernel8.elf -no-reboot -nographic -s &
-> qemu-system-aarch64 -M raspi3 -device loader,file=build/kernel8.elf -device loader,addr=0x100000,cpu-num=0 -no-reboot -serial null -serial stdio -s &
-> QEMU_PID=$$!
-> gdb -ex 'target remote :1234' build/kernel8.elf
+> qemu-system-aarch64 -M raspi3 -semihosting -device loader,file=build/kernel8.elf -no-reboot -serial null -serial stdio -d mmu,guest_errors
+.PHONY: emulate-rpi3
+
+debug-rpi3: build/kernel8.img build/kernel8.elf
+> qemu-system-aarch64 -M raspi3 -semihosting -device loader,file=build/kernel8.img -no-reboot -serial null -serial stdio -d mmu,guest_errors -S -s &
+> QEMU_PID=$$! # -ex 'layout split'
+> gdb -ex 'target remote :1234' -ex 'display /3i $$pc' -ex 'symbol-file build/kernel8.elf' #  -o -0xFFFF000000000000
 > kill $$QEMU_PID
 # > qemu-system-aarch64 -M raspi3 -kernel build/kernel8.img -serial stdio
-.PHONY: emulate-rpi3
+.PHONY: debug-rpi3
 
 # emulate-rpi2: build/kernel7.img
 # > qemu-system-arm -kernel build/kernel7.img -M versatilepb -no-reboot -nographic
@@ -30,7 +62,7 @@ clean: clean-build
 .PHONY: clean
 
 clean-build:
-> rm -r build/*
+> rm -rf build/*
 .PHONY: clean-build
 
 clean-rust:
@@ -41,44 +73,35 @@ clean-all: clean-build clean-rust
 > rm -r target build/*
 .PHONY: clean-all
 
-build/kernel8.img: build/kernel8.elf
-> aarch64-none-elf-objcopy build/kernel8.elf -O binary build/kernel8.img
+build/kernel$(ARM_VERSION).img: build/kernel$(ARM_VERSION).elf
+> $(ARM_PREFIX)-objcopy $^ -O binary --image-base=0x80000 $@
 
-# build/kernel7.img: build/kernel7.elf
-# > aarch64-none-elf-objcopy build/kernel7.elf -O binary build/kernel7.img
+build/kernel$(ARM_VERSION).elf: src/linker-64.ld $(OBJ_FILES) build/kernel$(ARM_VERSION).a
+> $(ARM_PREFIX)-gcc -T $< -o $@ -ffreestanding -O2 -nostdlib -lgcc $^
 
-build/kernel8.elf: build/boot.8.o build/utils.8.o build/kernel8.a src/linker-64.ld
-> aarch64-none-elf-gcc -T src/linker-64.ld -o build/kernel8.elf -ffreestanding -O2 -nostdlib build/boot.8.o build/utils.8.o build/kernel8.a -lgcc
+build/%_s.8.o: src/asm/64/%.S src/asm/64/%.h
+> $(ARM_PREFIX)-gcc -MMD -DENABLE_SEMIHOSTING -c $< -o $@
 
-# build/kernel7.elf: build/boot.7.o build/utils.7.o build/kernel7.a src/linker-32.ld
-# > arm-none-eabi-gcc -T src/linker-32.ld -o build/kernel7.elf -ffreestanding -O2 -nostdlib build/boot.7.o build/utils.7.o build/kernel7.a -lgcc
+build/%_s.7.o: src/asm/32/%.S src/asm/32/%.h
+> $(ARM_PREFIX)-gcc -mcpu=cortex-a7 -fpic -ffreestanding -c $< -o $@
 
-build/boot.8.o: src/boot.pi3-4.S src/exceptions.aarch64.S
-> aarch64-none-elf-gcc -MMD -c src/boot.pi3-4.S -o build/boot.8.o
+# build/dwc_otg__%.8.o: vendor/dwc_otg/%.c
+# > $(ARM_PREFIX)-gcc -MMD -DENABLE_SEMIHOSTING -DCONFIG_USB_DWC_OTG -c $< -o $@
 
-# build/boot.7.o: src/boot.pi2.S
-# > arm-none-eabi-gcc -mcpu=cortex-a7 -fpic -ffreestanding -c src/boot.pi2.S -o build/boot.7.o
+build/kernel$(ARM_VERSION).a: target/$(RUST_TRIPLE)/$(RUST_OPT_LEVEL)/libraspberry_pi_forth_os.a
+> cp "$^" "$@"
 
-build/utils.8.o: src/utils.S
-> aarch64-none-elf-gcc -MMD -c src/utils.S -o build/utils.8.o
+ifeq ($(RUST_OPT_LEVEL), release)
+  RUST_RELEASE_FLAG = --release
+else
+  RUST_RELEASE_FLAG =
+endif
 
-# build/utils.7.o: src/utils.S
-# > arm-none-eabi-gcc -mcpu=cortex-a7 -fpic -ffreestanding -c src/utils.S -o build/utils.7.o
+comma := ,
+empty :=
+space := $(empty) $(empty)
+RUST_FEATURES_FLAG := $(subst $(space),$(comma),$(RUST_FEATURES))
 
-build/kernel8.a: target/aarch64-unknown-none/debug/libraspberry_pi_forth_os.a
-> cp target/aarch64-unknown-none/debug/libraspberry_pi_forth_os.a build/kernel8.a
-
-# build/kernel7.a: target/armv7a-none-eabi/release/libraspberry_pi_forth_os.a
-# > cp target/armv7a-none-eabi/release/libraspberry_pi_forth_os.a build/kernel7.a
-
-target/aarch64-unknown-none/release/libraspberry_pi_forth_os.a: $(shell find src -type f -name '*.rs') Cargo.toml
-> cargo xbuild --target=aarch64-unknown-none --release --no-default-features --features=rpi3
-
-target/aarch64-unknown-none/debug/libraspberry_pi_forth_os.a: $(shell find src -type f -name '*.rs') Cargo.toml
-> cargo xbuild --target=aarch64-unknown-none --no-default-features --features=rpi3
-
-# target/armv7a-none-eabi/release/libraspberry_pi_forth_os.a: $(shell find src -type f -name '*.rs') Cargo.toml
-# > cargo xbuild --target=armv7a-none-eabi --release --no-default-features --features=rpi2
-
-# target/armv7a-none-eabi/debug/libraspberry_pi_forth_os.a: $(shell find src -type f -name '*.rs') Cargo.toml
-# > cargo xbuild --target=armv7a-none-eabi --no-default-features --features=rpi2
+target/$(RUST_TRIPLE)/$(RUST_OPT_LEVEL)/libraspberry_pi_forth_os.a: $(shell find src -type f -name '*.rs') Cargo.toml .cargo/config
+> cargo xbuild --target=$(RUST_TRIPLE) $(RUST_RELEASE_FLAG) --no-default-features --features=$(RUST_FEATURES_FLAG)
+> touch "$@"

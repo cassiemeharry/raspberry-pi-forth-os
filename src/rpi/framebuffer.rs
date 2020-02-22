@@ -95,133 +95,94 @@ impl Framebuffer {
                     size: u32,
                 }
 
-                const USE_PROPERTY_INTERFACE: bool = true;
-                let mut fb = if USE_PROPERTY_INTERFACE {
-                    #[repr(C)]
-                    #[derive(Debug)]
-                    struct AllocBuffer {
-                        addr: u32,
-                        size: u32,
-                    }
-                    let width: u32 = 640;
-                    let height: u32 = 480;
-                    let mut set_message = (
-                        // Allocate buffer
-                        PropertyMessage::new(0x0004_0001, AllocBuffer { addr: 0, size: 0 }),
-                        // Set size
-                        PropertyMessage::new(0x0004_8003, (width, height)),
-                        // Set virtual buffer width/height
-                        PropertyMessage::new(0x0004_8004, (width, height)),
-                        // Set depth
-                        PropertyMessage::new(0x0004_8005, 24_u32),
-                        // Set pixel order (0 = BGR, 1 = RGB)
-                        PropertyMessage::new(0x0004_8006, 1_u32),
-                        // Set pitch
-                        PropertyMessage::new(0x0004_8008, core::mem::align_of::<Pixel>() as u32),
-                    )
-                        .prepare();
-                    let buffer: &'static mut [u8] = match set_message.send() {
-                        Some(set_result) => {
-                            let buf_result = &set_result.0;
-                            if buf_result.addr == 0 {
-                                println!("Failed to initialize framebuffer (got null address back from GPU)");
-                                return;
-                            }
-                            if buf_result.size == 0 {
-                                println!("Failed to initialize framebuffer (got zero-size buffer back from GPU)");
-                                return;
-                            }
-                            let size_result = &set_result.1;
-                            unsafe {
-                                core::slice::from_raw_parts_mut(
-                                    buf_result.addr as usize as *mut u8,
-                                    (size_result.0 as usize) * (size_result.1 as usize) * 3,
-                                    // buf_result.size as usize,
-                                )
-                            }
-                        }
-                        None => {
-                            println!("Failed to initialize framebuffer");
+                #[repr(C)]
+                #[derive(Debug)]
+                struct AllocBuffer {
+                    addr: u32,
+                    size: u32,
+                }
+                let width: u32 = 640;
+                let height: u32 = 480;
+                let mut set_message = (
+                    // Allocate buffer
+                    PropertyMessage::new(0x0004_0001, AllocBuffer { addr: 0, size: 0 }),
+                    // Set size
+                    PropertyMessage::new(0x0004_8003, (width, height)),
+                    // Set virtual buffer width/height
+                    PropertyMessage::new(0x0004_8004, (width, height)),
+                    // Set depth
+                    PropertyMessage::new(0x0004_8005, 24_u32),
+                    // Set pixel order (0 = BGR, 1 = RGB)
+                    PropertyMessage::new(0x0004_8006, 1_u32),
+                    // Set pitch
+                    PropertyMessage::new(0x0004_8008, core::mem::align_of::<Pixel>() as u32),
+                )
+                    .prepare();
+                let buffer: &'static mut [u8] = match set_message.send() {
+                    Some(set_result) => {
+                        let buf_result = &set_result.0;
+                        if buf_result.addr == 0 {
+                            println!(
+                                "Failed to initialize framebuffer (got null address back from GPU)"
+                            );
                             return;
                         }
-                    };
-
-                    let mut get_message = (
-                        // Get size
-                        PropertyMessage::new(0x0004_0003, (width, height)),
-                        // Get depth
-                        PropertyMessage::new(0x0004_0005, 24_u32),
-                        // Get pixel order
-                        PropertyMessage::new(0x0004_0006, 0xFFFF_FFFF_u32),
-                        // Get virtual buffer width/height
-                        PropertyMessage::new(0x0004_0004, (0_u32, 0_u32)),
-                        // Get pitch
-                        PropertyMessage::new(0x0004_0008, 0_u32),
-                    )
-                        .prepare();
-                    match get_message.send() {
-                        Some(result) => {
-                            println!("Got result: {:#x?}", result);
-                            let size = *result.0;
-                            let depth = *result.1;
-                            let pixel_order = *result.2;
-                            let virtual_size = *result.3;
-                            let pitch = *result.4;
-                            assert_eq!(size, (width, height));
-                            assert_eq!(depth, 24);
-                            assert_eq!(pixel_order, 1);
-                            assert_eq!(virtual_size, (width, height));
-                            assert!(pitch > 0);
-                            Framebuffer {
-                                buffer,
-                                width: size.0,
-                                height: size.1,
-                                depth,
-                                pitch,
-                            }
-                        }
-                        None => {
-                            println!("Failed to initialize framebuffer");
+                        if buf_result.size == 0 {
+                            println!("Failed to initialize framebuffer (got zero-size buffer back from GPU)");
                             return;
                         }
-                    }
-                } else {
-                    const FB_CHANNEL: Channel = Channel::Framebuffer;
-                    let mut msg = FBInitMessage {
-                        width: 640,
-                        height: 480,
-                        v_width: 640,
-                        v_height: 640,
-                        pitch: 0,
-                        depth: 24,
-                        x_offset: 0,
-                        y_offset: 0,
-                        pointer: 0,
-                        size: 0,
-                    };
-                    let send_result = mailbox::send_raw_message(FB_CHANNEL, &mut msg);
-                    match send_result {
-                        Ok(0) => (),
-                        Ok(other) => {
-                            println!("Got unexpected framebuffer response message {:?}", other);
-                            return;
-                        }
-                        Err(()) => {
-                            println!("Failed to initialize framebuffer");
-                            return;
-                        }
-                    };
-                    Framebuffer {
-                        buffer: unsafe {
+                        let size_result = &set_result.1;
+                        unsafe {
                             core::slice::from_raw_parts_mut(
-                                msg.pointer as *mut u8,
-                                msg.size as usize,
+                                buf_result.addr as usize as *mut u8,
+                                (size_result.0 as usize) * (size_result.1 as usize) * 3,
+                                // buf_result.size as usize,
                             )
-                        },
-                        width: msg.width,
-                        height: msg.height,
-                        pitch: msg.pitch,
-                        depth: msg.depth,
+                        }
+                    }
+                    None => {
+                        println!("Failed to initialize framebuffer");
+                        return;
+                    }
+                };
+
+                let mut get_message = (
+                    // Get size
+                    PropertyMessage::new(0x0004_0003, (width, height)),
+                    // Get depth
+                    PropertyMessage::new(0x0004_0005, 24_u32),
+                    // Get pixel order
+                    PropertyMessage::new(0x0004_0006, 0xFFFF_FFFF_u32),
+                    // Get virtual buffer width/height
+                    PropertyMessage::new(0x0004_0004, (0_u32, 0_u32)),
+                    // Get pitch
+                    PropertyMessage::new(0x0004_0008, 0_u32),
+                )
+                    .prepare();
+                let mut fb = match get_message.send() {
+                    Some(result) => {
+                        // println!("Got result: {:#x?}", result);
+                        let size = *result.0;
+                        let depth = *result.1;
+                        let pixel_order = *result.2;
+                        let virtual_size = *result.3;
+                        let pitch = *result.4;
+                        assert_eq!(size, (width, height));
+                        assert_eq!(depth, 24);
+                        assert_eq!(pixel_order, 1);
+                        assert_eq!(virtual_size, (width, height));
+                        assert!(pitch > 0);
+                        Framebuffer {
+                            buffer,
+                            width: size.0,
+                            height: size.1,
+                            depth,
+                            pitch,
+                        }
+                    }
+                    None => {
+                        println!("Failed to initialize framebuffer");
+                        return;
                     }
                 };
                 f(&mut fb);

@@ -1,6 +1,6 @@
-#include "exceptions.aarch64.h"
+#include "exceptions.h"
 
-.section ".text.vector_table"
+.section ".text"
 
 .macro ventry label
     .p2align    7
@@ -38,24 +38,34 @@ ventry_\label:
 .endm
 
 .macro kernel_exit
-    ldp     x0, x1, [sp], #16
-    ldp     x2, x3, [sp], #16
-    ldp     x4, x5, [sp], #16
-    ldp     x6, x7, [sp], #16
-    ldp     x8, x9, [sp], #16
-    ldp     x10, x11, [sp], #16
-    ldp     x12, x13, [sp], #16
-    ldp     x14, x15, [sp], #16
-    ldp     x16, x17, [sp], #16
-    ldp     x18, x19, [sp], #16
-    ldp     x20, x21, [sp], #16
-    ldp     x22, x23, [sp], #16
-    ldp     x24, x25, [sp], #16
-    ldp     x26, x27, [sp], #16
-    ldp     x28, x29, [sp], #16
     ldr     x30, [sp], #8
+    ldp     x28, x29, [sp], #16
+    ldp     x26, x27, [sp], #16
+    ldp     x24, x25, [sp], #16
+    ldp     x22, x23, [sp], #16
+    ldp     x20, x21, [sp], #16
+    ldp     x18, x19, [sp], #16
+    ldp     x16, x17, [sp], #16
+    ldp     x14, x15, [sp], #16
+    ldp     x12, x13, [sp], #16
+    ldp     x10, x11, [sp], #16
+    ldp     x8, x9, [sp], #16
+    ldp     x6, x7, [sp], #16
+    ldp     x4, x5, [sp], #16
+    ldp     x2, x3, [sp], #16
+    ldp     x0, x1, [sp], #16
     eret
 .endm
+
+.globl enable_irq
+enable_irq:
+    msr     daifclr, #2
+    ret
+
+.globl  disable_irq
+disable_irq:
+    msr     daifset, #2
+    ret
 
 .p2align      11
 .globl vectors
@@ -65,8 +75,8 @@ vectors:
     ventry  fiq_invalid_el1t    // FIQ EL1t
     ventry  error_invalid_el1t  // Error EL1t
 
-    ventry  el1_sync            // Synchronous EL1h
-    ventry  el1_irq             // IRQ EL1h
+    ventry  sync_el1h           // Synchronous EL1h
+    ventry  irq_invalid_el1h    // IRQ EL1h
     ventry  fiq_invalid_el1h    // FIQ EL1h
     ventry  error_invalid_el1h  // Error EL1h
 
@@ -94,8 +104,17 @@ fiq_invalid_el1t:
 error_invalid_el1t:
     handle_invalid_entry ERROR_INVALID_EL1t
 
-// sync_invalid_el1h:
-//     handle_invalid_entry SYNC_INVALID_EL1h
+sync_el1h:
+    // handle_invalid_entry SYNC_INVALID_EL1h
+    kernel_entry
+    bl      handle_sync
+    kernel_exit
+
+irq_invalid_el1h:
+    handle_invalid_entry IRQ_INVALID_EL1h
+    // kernel_entry
+    // bl      handle_irq
+    // kernel_exit
 
 fiq_invalid_el1h:
     handle_invalid_entry FIQ_INVALID_EL1h
@@ -126,14 +145,3 @@ fiq_invalid_el0_32:
 
 error_invalid_el0_32:
     handle_invalid_entry ERROR_INVALID_EL0_32
-
-
-el1_sync:
-    kernel_entry
-    bl      handle_sync
-    kernel_exit
-
-el1_irq:
-    kernel_entry
-    bl      handle_irq
-    kernel_exit

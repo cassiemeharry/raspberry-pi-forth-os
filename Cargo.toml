@@ -12,11 +12,17 @@ default = []
 
 rpi2 = []
 rpi3 = []
+semihosting = []
 
 [dependencies]
 bitflags = "1"
+bitfield = "0.13"
+bit_field = "0.10"
+cfg-if = "0.1"
+enum-repr = "0.2"
 font8x8 = { version = "0.2", default-features = false, features = ["unicode"] }
-panic-halt = "0.2"
+# panic-halt = "0.2"
+qemu-exit = "0.1"
 spin = "0.5"
 
 [dependencies.byteorder]
@@ -27,4 +33,8 @@ default-features = false
 panic = "abort"
 
 [profile.release]
+debug = true
 panic = "abort"
+
+[profile.release.overrides."*"]
+debug = false

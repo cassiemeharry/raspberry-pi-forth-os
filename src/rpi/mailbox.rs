@@ -71,7 +71,7 @@ unsafe fn read_mailbox(channel: u8) -> u32 {
     // If the channel is not the one we wish to read from (i.e: 1), go to step 1
     // Return the data (i.e: the read value >> 4)
 
-    println!("Reading mailbox (want channel {})", channel);
+    // println!("Reading mailbox (want channel {})", channel);
 
     loop {
         loop {
@@ -84,12 +84,12 @@ unsafe fn read_mailbox(channel: u8) -> u32 {
         let data: u32 = read_reg(MAIL_BASE, MAILBOX_OFFFSETS.read);
         let read_channel = (data & 0x0F) as u8;
         let data = data >> 4;
-        println!(
-            "Got data from mailbox: {:#8x} (from channel {})",
-            data, read_channel
-        );
+        // println!(
+        //     "Got data from mailbox: {:#8x} (from channel {})",
+        //     data, read_channel
+        // );
         if read_channel != channel {
-            println!("Wrong channel, trying again...");
+            // println!("Wrong channel, trying again...");
             continue;
         }
         return data;
@@ -100,7 +100,7 @@ unsafe fn write_mailbox(channel: u8, data: u32) {
     // 1. Read the status register until the full flag is not set.
     // 2. Write the data (shifted into the upper 28 bits) combined with the
     //    channel (in the lower four bits) to the write register.
-    println!("Writing {:#8x} to mailbox channel {}", data, channel);
+    // println!("Writing {:#8x} to mailbox channel {}", data, channel);
     loop {
         // Wait for space
         fence(Ordering::SeqCst);
@@ -110,7 +110,7 @@ unsafe fn write_mailbox(channel: u8, data: u32) {
     }
     write_reg(MAIL_BASE, MAILBOX_OFFFSETS.write, data | (channel as u32));
     fence(Ordering::SeqCst);
-    println!("Finished writing to mailbox");
+    // println!("Finished writing to mailbox");
 }
 
 pub trait PropertyTagList: Sized {
@@ -173,11 +173,11 @@ impl<TL: PropertyTagList> PropertyMessageWrapper<TL> {
     where
         TL: fmt::Debug,
     {
-        println!("Property message before sending over mailbox: {:#x?}", self);
-        println!(
-            "Property message quads before sending over mailbox: {:#x?}",
-            self.as_quads()
-        );
+        // println!("Property message before sending over mailbox: {:#x?}", self);
+        // println!(
+        //     "Property message quads before sending over mailbox: {:#x?}",
+        //     self.as_quads()
+        // );
         const CHANNEL: u8 = Channel::PropertyTagsSend as u8;
         unsafe {
             let ptr = self as *const Self;
@@ -187,14 +187,14 @@ impl<TL: PropertyTagList> PropertyMessageWrapper<TL> {
             // let resp_ptr = resp_addr as *const u32;
             // println!("Got response from mailbox: {:#?}", &*resp_ptr);
             // let resp_code: u32 = *resp_ptr.offset(1);
-            println!(
-                "Property message after response {:#8x}: {:#x?}",
-                resp_addr, self
-            );
-            {
-                let message_quads = self.as_quads();
-                println!("Property message words: {:#x?}", message_quads);
-            }
+            // println!(
+            //     "Property message after response {:#8x}: {:#x?}",
+            //     resp_addr, self
+            // );
+            // {
+            //     let message_quads = self.as_quads();
+            //     println!("Property message words: {:#x?}", message_quads);
+            // }
             if self.code != 0x8000_0000 {
                 return None;
             }
@@ -282,10 +282,10 @@ pub fn send_raw_message<T: fmt::Debug>(channel: Channel, msg: &mut T) -> Result<
         write_mailbox(channel as u8, msg_addr_u32);
         resp = read_mailbox(channel as u8);
     }
-    println!(
-        "Got response {:#8x} after raw message send: {:#x?}",
-        resp, msg
-    );
+    // println!(
+    //     "Got response {:#8x} after raw message send: {:#x?}",
+    //     resp, msg
+    // );
     Ok(resp)
 }
 

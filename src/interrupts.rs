@@ -1,11 +1,12 @@
-use core::sync::atomic::{AtomicUsize, Ordering};
 use bitflags::bitflags;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use enum_repr::EnumRepr;
 
 pub mod handlers;
 
-#[repr(C, align(128))]
+#[repr(C)]
 struct InterruptHandler {
-    func: extern "C" fn(),
+    func_code: [u32; 32]
 }
 
 #[repr(C)]
@@ -25,16 +26,16 @@ struct ExceptionVectorTable {
 }
 
 extern "C" {
+    #[link_name = "vectors"]
     #[no_mangle]
-    static vectors: [ExceptionVectorTable; 4];
+    static VECTORS: [ExceptionVectorTable; 4];
 }
 
 #[cfg(target_arch = "aarch64")]
-#[no_mangle]
 pub fn exception_vector_init() {
     unsafe {
-        let addr = &vectors as *const [ExceptionVectorTable; 4] as usize;
-        asm!("msr vbar_el1, $0" :: "r"(addr));
+        let addr = &VECTORS as *const [ExceptionVectorTable; 4] as usize;
+        asm!("msr vbar_el1, $0" :: "r"(addr) :: "volatile");
     }
 }
 
@@ -91,10 +92,54 @@ where
     result
 }
 
+#[EnumRepr(type = "u16")]
+#[derive(Copy, Clone, Debug)]
+enum ExceptionClass {
+    Unknown = 0b000000,
+    TrappedWFx = 0b000001,
+    TrappedMcrCoprocF = 0b000011,
+    TrappedMcrrCoprocF = 0b000100,
+    TrappedMcrCoprocE = 0b000101,
+    TrappedLdcStr = 0b000110,
+    TrappedSveSIMDFp = 0b000111,
+    TrappedVMRS = 0b001000,
+    TrappedPAUTHN = 0b001001,
+    TrappedMrrcE = 0b001100,
+    IllegalExecutionState = 0b001110,
+    SVCFromAarch32 = 0b010001,
+    HVCFromAarch32 = 0b010010,
+    SMCFromAarch32 = 0b010011,
+    SVCFromAarch64 = 0b010101,
+    HVCFromAarch64 = 0b010110,
+    SMCFromAarch64 = 0b010111,
+    TrappedOtherSystemInstr = 0b011000,
+    TrappedSVE = 0b011001,
+    TrappedERET = 0b011010,
+    ImplDefinedToEL3 = 0b011111,
+    InstructionAbortFromLower = 0b100000,
+    InstructionAbortFromSame = 0b100001,
+    PCAlignmentFault = 0b100010,
+    DataAbortFromLower = 0b100100,
+    DataAbortFromSame = 0b100101,
+    SPAlignmentFault = 0b100110,
+    TrappedFPFromAarch32 = 0b101000,
+    TrappedFPFromAarch64 = 0b101100,
+    SErrorInterrupt = 0b101111,
+    BreakpointFromLower = 0b110000,
+    BreakpointFromSame = 0b110001,
+    StepExceptionFromLower = 0b110010,
+    StepExceptionFromSame = 0b110011,
+    WatchpointExceptionFromLower = 0b110100,
+    Watchpoint = 0b110101,
+    BKPTFromAarch32 = 0b111000,
+    VectorCATCHFromAarch32 = 0b111010,
+    BRKFromAarch64 = 0b111100,
+}
+
 #[derive(Clone, Debug)]
 pub struct ExceptionStatus {
     level: u8,
-    exception_class: u8,
+    exception_class: Result<ExceptionClass, u16>,
     instr_is_quad: bool,
     iss: u32,
     fault_address: *mut (),
@@ -111,7 +156,7 @@ impl ExceptionStatus {
             1 => {
                 let exception_syndrome: u32;
                 asm!("mrs $0, ESR_EL1" : "=r"(exception_syndrome));
-                let ec = (exception_syndrome >> 26) as u8;
+                let ec = (exception_syndrome >> 26) as u16;
                 let il = (exception_syndrome >> 25) & 1;
                 let iss = exception_syndrome & 0x01FF_FFFF;
                 let fault_address: *mut ();
@@ -120,7 +165,7 @@ impl ExceptionStatus {
                 asm!("mrs $0, ELR_EL1" : "=r"(exception_link));
                 Some(ExceptionStatus {
                     level,
-                    exception_class: ec,
+                    exception_class: ExceptionClass::from_repr(ec).ok_or(ec),
                     instr_is_quad: il == 1,
                     iss,
                     fault_address,
@@ -130,7 +175,7 @@ impl ExceptionStatus {
             2 => {
                 let exception_syndrome: u32;
                 asm!("mrs $0, ESR_EL2" : "=r"(exception_syndrome));
-                let ec = (exception_syndrome >> 26) as u8;
+                let ec = (exception_syndrome >> 26) as u16;
                 let il = (exception_syndrome >> 25) & 1;
                 let iss = exception_syndrome & 0x01FF_FFFF;
                 let fault_address: *mut ();
@@ -139,7 +184,7 @@ impl ExceptionStatus {
                 asm!("mrs $0, ELR_EL2" : "=r"(exception_link));
                 Some(ExceptionStatus {
                     level,
-                    exception_class: ec,
+                    exception_class: ExceptionClass::from_repr(ec).ok_or(ec),
                     instr_is_quad: il == 1,
                     iss,
                     fault_address,
@@ -149,7 +194,7 @@ impl ExceptionStatus {
             3 => {
                 let exception_syndrome: u32;
                 asm!("mrs $0, ESR_EL3" : "=r"(exception_syndrome));
-                let ec = (exception_syndrome >> 26) as u8;
+                let ec = (exception_syndrome >> 26) as u16;
                 let il = (exception_syndrome >> 25) & 1;
                 let iss = exception_syndrome & 0x01FF_FFFF;
                 let fault_address: *mut ();
@@ -158,7 +203,7 @@ impl ExceptionStatus {
                 asm!("mrs $0, ELR_EL3" : "=r"(exception_link));
                 Some(ExceptionStatus {
                     level,
-                    exception_class: ec,
+                    exception_class: ExceptionClass::from_repr(ec).ok_or(ec),
                     instr_is_quad: il == 1,
                     iss,
                     fault_address,
