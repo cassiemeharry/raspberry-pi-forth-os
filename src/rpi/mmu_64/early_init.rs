@@ -1,4 +1,6 @@
+use alloc::boxed::Box;
 use core::sync::atomic::{compiler_fence, Ordering};
+use spin::{Mutex, Once};
 
 use super::{
     addrs::{PhysAddr, VirtAddr},
@@ -6,60 +8,59 @@ use super::{
 };
 use crate::rpi::mmio;
 
-macro_rules! page_table_accessor {
-    ($fn_name:ident, $marker:ty, $start:ident, $end:ident) => {
-        pub unsafe fn $fn_name() -> &'static mut [PageTable<$marker>] {
-            let start_ptr = &mut $start as *mut MARKER as *mut PageTable<$marker>;
-            let end_ptr = &mut $end as *mut MARKER as *mut PageTable<$marker>;
-            let size = ((end_ptr as usize) - (start_ptr as usize))
-                / core::mem::size_of::<PageTable<$marker>>();
-            core::slice::from_raw_parts_mut(start_ptr, size)
-        }
-    };
-}
+// #[repr(C)]
+// #[derive(Copy, Clone)]
+// struct FakeSlice<T> {
+//     ptr: *mut T,
+//     size: usize,
+// }
 
-page_table_accessor!(
-    global_page_tables,
-    Global,
-    GLOBAL_PAGE_TABLES_START,
-    UPPER_PAGE_TABLES_START
-);
-// page_table_accessor!(
-//     upper_page_tables,
-//     Upper,
-//     UPPER_PAGE_TABLES_START,
-//     MIDDLE_PAGE_TABLES_START
-// );
-page_table_accessor!(
-    middle_page_tables,
-    Middle,
-    MIDDLE_PAGE_TABLES_START,
-    BOTTOM_PAGE_TABLES_START
-);
-page_table_accessor!(
-    bottom_page_tables,
-    Bottom,
-    BOTTOM_PAGE_TABLES_START,
-    PAGE_TABLES_END
-);
+// impl<T> FakeSlice<T> {
+//     unsafe fn into_slice<'a>(self) -> &'a mut [T] {
+//         core::slice::from_raw_parts_mut(self.ptr, self.size)
+//     }
+// }
+
+// #[repr(C)]
+// struct InitialPageTables {
+//     global: *mut PageTable<Global>,
+//     middle: FakeSlice<*mut PageTable<Middle>>,
+//     bottom: FakeSlice<*mut PageTable<Bottom>>,
+// }
+
+// impl PageTables<'static> {
+//     unsafe fn load_initial() -> Self {
+//         let init = &INITIAL_PAGE_TABLES;
+//         let middle = init.middle.into_slice();
+//         let bottom = init.bottom.into_slice();
+//         PageTables {
+//             global: &mut *init.global,
+//             middle: core::mem::transmute(middle),
+//             bottom: core::mem::transmute(bottom),
+//         }
+//     }
+// }
 
 extern "C" {
     fn enable_mmu();
 
-    #[link_name = "__page_table_global"]
-    static mut GLOBAL_PAGE_TABLES_START: MARKER;
+    // #[link_name = "__page_table_global"]
+    // static mut GLOBAL_PAGE_TABLE: PageTable<Global>;
 
-    #[link_name = "__page_tables_upper"]
-    static mut UPPER_PAGE_TABLES_START: MARKER;
+    // #[link_name = "init_page_tables"]
+    // static mut INITIAL_PAGE_TABLES: InitialPageTables;
 
-    #[link_name = "__page_tables_middle"]
-    static mut MIDDLE_PAGE_TABLES_START: MARKER;
+    // #[link_name = "__page_tables_upper"]
+    // static mut UPPER_PAGE_TABLES_START: MARKER;
 
-    #[link_name = "__page_tables_bottom"]
-    static mut BOTTOM_PAGE_TABLES_START: MARKER;
+    // #[link_name = "__page_tables_middle"]
+    // static mut MIDDLE_PAGE_TABLES_START: MARKER;
 
-    #[link_name = "__page_tables_end"]
-    static mut PAGE_TABLES_END: MARKER;
+    // #[link_name = "__page_tables_bottom"]
+    // static mut BOTTOM_PAGE_TABLES_START: MARKER;
+
+    // #[link_name = "__page_tables_end"]
+    // static mut PAGE_TABLES_END: MARKER;
 
     type MARKER;
 
@@ -77,15 +78,6 @@ extern "C" {
     static IMAGE_END: MARKER;
 }
 
-// 1 GB of memory
-const PHYS_MEMORY_SIZE: usize = 0x40_000_000;
-
-// const MM_ACCESS: u64 = 0x1 << 10;
-// const MM_ACCESS_PERMISSION: u64 = 0x01 << 6;
-
-#[allow(non_upper_case_globals)]
-const MT_DEVICE_nGnRnE: u64 = 0x0;
-const MT_NORMAL_NC: u64 = 0x1;
 #[allow(non_upper_case_globals)]
 const MT_DEVICE_nGnRnE_FLAGS: u64 = 0x00;
 const MT_NORMAL_NC_FLAGS: u64 = 0x44;
@@ -94,8 +86,7 @@ const MAIR_VALUE: u64 = (MT_DEVICE_nGnRnE_FLAGS
     | (MT_NORMAL_NC_FLAGS << (8 * DescriptorFlags::ATTR_INDEX_NORMAL_NC.bits()));
 
 const VA_START: usize = 0xffff_0000_0000_0000;
-
-// const MMU_PTE_FLAGS: DescriptorFlags = MM_TYPE_PAGE | MT_NORMAL_NC | MM_ACCESS | MM_ACCESS_PERMISSION;
+const PHYS_MEMORY_SIZE: usize = 0x1_0000_0000;
 
 bitflags! {
     struct TCRFlags: u64 {
@@ -134,6 +125,19 @@ bitflags! {
 }
 
 #[link_section = ".text.boot"]
+unsafe fn zero_bss_segment() {
+    // Zero out the .bss segment
+    let start_ptr = &mut BSS_START as *mut MARKER as *mut u32;
+    let length_bytes =
+        (&BSS_END as *const MARKER as usize) - (&BSS_START as *const MARKER as usize);
+    let mut bss_slice =
+        core::slice::from_raw_parts_mut(start_ptr, length_bytes / core::mem::size_of::<u32>());
+    for word in bss_slice.iter_mut() {
+        *word = 0;
+    }
+}
+
+#[link_section = ".text.boot"]
 #[no_mangle]
 pub unsafe extern "C" fn __memory_init() {
     // Set bits 21:20 of CPACR_EL1 so the later Rust code doesn't fail due to
@@ -155,31 +159,26 @@ msr cpacr_el1, $0"
 
     compiler_fence(Ordering::SeqCst);
 
-    // Zero out the .bss segment
-    let start_ptr = &mut BSS_START as *mut MARKER as *mut u32;
-    let length_bytes =
-        (&BSS_END as *const MARKER as usize) - (&BSS_START as *const MARKER as usize);
-    let mut bss_slice =
-        core::slice::from_raw_parts_mut(start_ptr, length_bytes / core::mem::size_of::<u32>());
-    for word in bss_slice.iter_mut() {
-        *word = 0;
-    }
+    zero_bss_segment();
 
-    create_page_tables();
+    PageTables::with_page_tables(|mut page_tables| {
+        create_page_tables(&mut page_tables);
 
-    let root_page_table: *const PageTable<Global> = global_page_tables().as_ptr();
-    TTBR::<1, 1>::from(root_page_table)
-        .set_outer_sharable()
-        .set_inner_region(0)
-        .set_outer_region(0)
-        .install();
-    TTBR::<0, 1>::from(root_page_table)
-        .set_outer_sharable()
-        .set_inner_region(0)
-        .set_outer_region(0)
-        .install();
+        let root_page_table: *const PageTable<Global> =
+            page_tables.global as *mut PageTable<Global> as *const PageTable<Global>;
+        TTBR::<1, 1>::from(root_page_table)
+            .set_outer_sharable()
+            .set_inner_region(0)
+            .set_outer_region(0)
+            .install();
+        TTBR::<0, 1>::from(root_page_table)
+            .set_outer_sharable()
+            .set_inner_region(0)
+            .set_outer_region(0)
+            .install();
 
-    println!("{:?}\t{:?}", TTBR::<0, 1>::load(), TTBR::<1, 1>::load());
+        println!("{:?}\t{:?}", TTBR::<0, 1>::load(), TTBR::<1, 1>::load());
+    });
 
     let tcr_el1_value = (TCRFlags::T0SZ_2_32
         | TCRFlags::T1SZ_2_32
@@ -253,9 +252,14 @@ msr cpacr_el1, $0"
 
     let pc: usize;
     asm!("adr $0, ." : "=r"(pc));
-    let example_input_addresses: [*const u32; 6] = [
+    let example_input_addresses: [*const u32; 10] = [
         ((create_page_tables as *const u32 as usize) | 0xFFFF_FFFF_0000_0000) as *const u32,
-        ((global_page_tables().as_ptr() as usize) | 0xFFFF_FFFF_0000_0000) as *const u32,
+        ((create_page_tables as *const u32 as usize) | 0xFFFF_FFF0_0000_0000) as *const u32,
+        ((create_page_tables as *const u32 as usize) | 0xFFFF_FF00_0000_0000) as *const u32,
+        ((create_page_tables as *const u32 as usize) | 0xFFFF_F000_0000_0000) as *const u32,
+        ((create_page_tables as *const u32 as usize) | 0xFFFF_0000_0000_0000) as *const u32,
+        create_page_tables as *const u32,
+        // ((global_page_tables().as_ptr() as usize) | 0xFFFF_FFFF_0000_0000) as *const u32,
         ((&BSS_START as *const _ as *const u32 as usize) | 0xFFFF_FFFF_0000_0000) as *const u32,
         crate::rpi::mmio::P_BASE as *const u32,
         crate::rpi::mmio::P_BASE_PHYSICAL_ADDR as *const u32,
@@ -269,36 +273,42 @@ AT S1E1R, $1
 mrs $0, PAR_EL1
 " : "=r"(par_el1) : "r"(input_address));
         use bit_field::BitField;
-        let par_el1_f = par_el1.get_bit(0);
-        let par_el1_sh = par_el1.get_bits(7..=8);
-        let par_el1_ns = par_el1.get_bit(9);
-        let par_el1_pa = par_el1.get_bits(12..=47) << 12;
-        println!(
-            "Translated address {:?} to {:#016x}\n\tFailed: {:?}\tSH: {:#04b}\tNS: {:?}\tPA: {:#016X}",
-            input_address, par_el1,
-            par_el1_f, par_el1_sh, par_el1_ns, par_el1_pa,
-        );
+        let par_el1_failed = par_el1.get_bit(0);
+        if par_el1_failed {
+            let par_el1_stage = par_el1.get_bits(9..=9) + 1;
+            let par_el1_page_table_walk = par_el1.get_bit(8);
+            // DFSC, see D13-2946
+            let par_el1_fault_status_code = par_el1.get_bits(1..=6);
+            println!(
+                "Failed to translate address {:016p}\n\tStage: {}\tPTW: {:?}\tFault status code: 0b{:05b}",
+                input_address, par_el1_stage, par_el1_page_table_walk, par_el1_fault_status_code
+            );
+        } else {
+            let par_el1_sh = par_el1.get_bits(7..=8);
+            let par_el1_ns = par_el1.get_bit(9);
+            let output_address = (par_el1.get_bits(12..=47) << 12) as *const u8;
+            println!(
+                "Successfully translated address {:016p} to {:016p}\n\tSH: 0b{:02b}\tNS: {:?}",
+                input_address, output_address, par_el1_sh, par_el1_ns
+            );
+        }
     }
 }
 
 #[link_section = ".text.boot"]
-unsafe fn create_page_tables() {
+unsafe fn create_page_tables(page_tables: &mut PageTables) {
     {
-        for table in global_page_tables().iter_mut() {
-            table.zero();
-        }
+        page_tables.global.zero();
         // for table in upper_page_tables().iter_mut() {
         //     table.zero();
         // }
-        for table in middle_page_tables().iter_mut() {
+        for table in page_tables.middle.iter_mut() {
             table.zero();
         }
-        for table in bottom_page_tables().iter_mut() {
+        for table in page_tables.bottom.iter_mut() {
             table.zero();
         }
     }
-
-    let mut page_tables = PageTables::new();
 
     let va_device_start = mmio::P_BASE_OFFSET;
     let va_device_end = PHYS_MEMORY_SIZE - SECTION_SIZE;
@@ -306,13 +316,13 @@ unsafe fn create_page_tables() {
     let va_start = &IMAGE_START as *const MARKER as usize;
     let va_end = PHYS_MEMORY_SIZE;
     // assert_eq!(va_start, 0);
+
     super::map_memory(
-        &mut page_tables,
+        page_tables,
         0,
         va_start,
         va_end,
-        DescriptorFlags::VALID
-            | DescriptorFlags::ATTR_INDEX_NORMAL_NC
+        DescriptorFlags::ATTR_INDEX_NORMAL_NC
             | DescriptorFlags::EL1_RW_EL0_NONE
             | DescriptorFlags::NON_SECURE
             | DescriptorFlags::ACCESS,
@@ -320,12 +330,11 @@ unsafe fn create_page_tables() {
     .expect("Failed to identity map image");
 
     super::map_memory(
-        &mut page_tables,
+        page_tables,
         mmio::P_BASE_PHYSICAL_ADDR,
         va_device_start,
         va_device_end,
-        DescriptorFlags::VALID
-            | DescriptorFlags::ATTR_INDEX_DEVICE_NGNRNE
+        DescriptorFlags::ATTR_INDEX_DEVICE_NGNRNE
             | DescriptorFlags::EL1_RW_EL0_NONE
             | DescriptorFlags::NON_SECURE
             | DescriptorFlags::ACCESS,

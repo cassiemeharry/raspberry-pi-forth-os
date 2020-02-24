@@ -1,5 +1,6 @@
 #![allow(incomplete_features)]
 #![allow(unused)]
+#![feature(alloc_error_handler)]
 #![feature(asm)]
 #![feature(const_fn)]
 #![feature(const_generics)]
@@ -7,6 +8,7 @@
 #![feature(extern_types)]
 #![feature(panic_info_message)]
 #![feature(ptr_offset_from)]
+#![feature(specialization)]
 #![feature(step_trait)]
 #![no_std]
 
@@ -16,11 +18,12 @@ compile_error!("Either feature \"rpi2\" or \"rpi3\" must be enabled for this cra
 #[cfg(all(feature = "rpi2", feature = "rpi3"))]
 compile_error!("Features \"rpi2\" and \"rpi3\" are mutually exclusive.");
 
-// extern crate panic_halt;
+extern crate alloc;
 
-mod allocator;
 #[macro_use]
 mod console;
+
+mod allocator;
 mod interrupts;
 mod panic_handler;
 mod rpi;
@@ -28,6 +31,9 @@ mod rpi;
 #[no_mangle]
 pub fn kernel_main() {
     println!("Hello, world!");
+
+    let s = alloc::string::String::from("It's a string on the heap!");
+    println!("Got a heap-allocated string here: {}", s);
 
     qemu_exit::aarch64::exit_success();
 

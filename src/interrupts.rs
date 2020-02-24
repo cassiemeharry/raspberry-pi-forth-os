@@ -94,7 +94,7 @@ where
 
 #[EnumRepr(type = "u16")]
 #[derive(Copy, Clone, Debug)]
-enum ExceptionClass {
+pub enum ExceptionClass {
     Unknown = 0b000000,
     TrappedWFx = 0b000001,
     TrappedMcrCoprocF = 0b000011,

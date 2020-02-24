@@ -5,7 +5,7 @@ use core::{
     sync::atomic::{fence, Ordering},
 };
 
-use crate::allocator::align_up;
+use super::mmu::align_up;
 
 const MAIL_BASE: usize = 0xB880;
 
@@ -254,7 +254,7 @@ impl<T: Sized> From<(u32, T)> for PropertyMessage<T> {
 
 impl<T> PropertyMessage<T> {
     pub fn new(tag: u32, buffer: T) -> Self {
-        let buffer_size = align_up(mem::size_of::<T>(), 4)
+        let buffer_size = align_up(mem::size_of::<T>(), 2)
             .try_into()
             .expect("Property message size is too big to fit in a u32");
         PropertyMessage {

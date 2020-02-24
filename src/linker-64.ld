@@ -22,17 +22,20 @@ SECTIONS
     . = ALIGN(0x8);
     __bss_end = .;
     __bss_size = __bss_end - __bss_start;
+    /*
     . = 0x83000;
     .data.pgd : {
         __page_table_global = .;
         . += (1 << 12);
         __page_tables_upper = .;
-        . += (4 * (1 << 12));
+        . += (2 * (1 << 12));
         __page_tables_middle = .;
-        . += (16 * (1 << 12));
+        . += (4 * (1 << 12));
         __page_tables_bottom = .;
-        . += (64 * (1 << 12));
+        . += (8 * (1 << 12));
         __page_tables_end = .;
     }
+    */
+    . = ALIGN(4096);
     __end = .;
 }

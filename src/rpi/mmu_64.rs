@@ -1,3 +1,4 @@
+use alloc::{boxed::Box, vec::Vec};
 use bit_field::BitField;
 use bitflags::bitflags;
 use core::{
@@ -8,246 +9,21 @@ use core::{
 };
 
 mod addrs;
+mod descriptors;
 /// Items in this module should not be accessed by the kernel outside of the
 /// early boot process.
 mod early_init;
+mod levels;
+mod page_tables;
 mod ttbr;
 
+use self::{descriptors::*, levels::*, page_tables::PageTables};
 pub use ttbr::TTBR;
 
 const ENTRY_COUNT: usize = 512;
 
-const PAGE_SHIFT: usize = 12;
-const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
-const TABLE_SHIFT: usize = 9;
-const TABLE_SIZE: usize = 1 << TABLE_SHIFT;
-const SECTION_SHIFT: usize = PAGE_SHIFT + TABLE_SHIFT;
-const SECTION_SIZE: usize = 1 << SECTION_SHIFT;
-
-pub struct PageTables<'a> {
-    global: &'a mut PageTable<Global>,
-    // upper: &'a mut [PageTable<Upper>],
-    middle: &'a mut [PageTable<Middle>],
-    bottom: &'a mut [PageTable<Bottom>],
-}
-
-impl PageTables<'static> {
-    pub unsafe fn new() -> Self {
-        PageTables {
-            global: &mut early_init::global_page_tables()[0],
-            // upper: early_init::upper_page_tables(),
-            middle: early_init::middle_page_tables(),
-            bottom: early_init::bottom_page_tables(),
-        }
-    }
-}
-
-pub trait PageTableLevel: Copy + core::fmt::Debug {
-    const SHIFT: usize;
-
-    fn block_size() -> usize {
-        1 << Self::SHIFT
-    }
-
-    fn table_index(virt_addr: usize) -> PageTableIndex {
-        let index = (virt_addr >> Self::SHIFT) & ((1 << TABLE_SHIFT) - 1);
-        PageTableIndex::new(index as u16)
-    }
-}
-
-pub trait PageTableLevelHasNext: PageTableLevel {
-    type Next: PageTableLevel;
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Unknown;
-
-#[derive(Copy, Clone, Debug)]
-pub struct Global;
-impl PageTableLevel for Global {
-    const SHIFT: usize = PAGE_SHIFT + 2 * TABLE_SHIFT;
-}
-
-impl PageTableLevelHasNext for Global {
-    type Next = Middle;
-}
-
-// #[derive(Copy, Clone, Debug)]
-// pub struct Upper;
-// impl PageTableLevel for Upper {
-//     const SHIFT: usize = PAGE_SHIFT + 2 * TABLE_SHIFT;
-// }
-
-// impl PageTableLevelHasNext for Upper {
-//     type Next = Middle;
-// }
-
-#[derive(Copy, Clone, Debug)]
-pub struct Middle;
-impl PageTableLevel for Middle {
-    const SHIFT: usize = PAGE_SHIFT + 1 * TABLE_SHIFT;
-}
-
-impl PageTableLevelHasNext for Middle {
-    type Next = Bottom;
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Bottom;
-impl PageTableLevel for Bottom {
-    const SHIFT: usize = PAGE_SHIFT + 0 * TABLE_SHIFT;
-}
-
-bitflags! {
-    pub struct DescriptorFlags: u64 {
-        const VALID = 1 << 0;
-
-        const PAGE_TABLE_FLAG = 1 << 1;
-
-        const ATTR_INDEX_DEVICE_NGNRNE = 0;
-        const ATTR_INDEX_NORMAL_NC = 1;
-
-        const NON_SECURE = 1 << 5;
-
-        const EL1_RW_EL0_NONE = 0b00 << 6;
-        const EL1_RW_EL0_RW = 0b01 << 6;
-        const EL1_R0_EL0_NONE = 0b10 << 6;
-        const EL1_R0_EL0_RO = 0b11 << 6;
-
-        const ACCESS = 1 << 10;
-        const NOT_GLOBAL = 1 << 11;
-
-        const PRIVILEGED_EXECUTE_NEVER = 1 << 53;
-        const EXECUTE_NEVER = 1 << 54;
-
-        const NORMAL_FLAGS = ((1 << 0) | (1 << 2) | (1 << 10));
-        const DEVICE_FLAGS = ((1 << 0) | (0 << 2) | (1 << 10));
-    }
-}
-
-#[repr(transparent)]
-#[derive(Copy, Clone)]
-pub struct PageTableDescriptor<L> {
-    value: u64,
-    // Describes the level the descriptor is placed in.
-    level: PhantomData<L>,
-}
-
-impl<L: Copy> fmt::Debug for PageTableDescriptor<L> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.is_unused() {
-            f.debug_struct("PageTableDescriptor")
-                .field("unused", &true)
-                .field("value", &self.value)
-                .finish()
-        } else if self.is_table_ptr() {
-            f.debug_struct("PageTableDescriptor")
-                .field(
-                    "table_pointer",
-                    &((self.value & 0x0000_FFFF_FFFF_F000) as *const PageTable<L>),
-                )
-                .field("attr_index", &(self.value.get_bits(2..=4)))
-                .field("non_secure", &(self.value.get_bit(5)))
-                .field("access_permission", &(self.value.get_bits(6..=7)))
-                .field("sharability", &(self.value.get_bits(8..=9)))
-                .field("access", &(self.value.get_bit(10)))
-                .field("not_global", &(self.value.get_bit(11)))
-                .finish()
-        } else {
-            f.debug_struct("PageTableDescriptor")
-                .field(
-                    "physical_address",
-                    &((self.value & 0x0000_FFFF_FFFF_0000) as *const [u8; 4096]),
-                )
-                .field("attr_index", &(self.value.get_bits(2..=4)))
-                .field("non_secure", &(self.value.get_bit(5)))
-                .field("access_permission", &(self.value.get_bits(6..=7)))
-                .field("sharability", &(self.value.get_bits(8..=9)))
-                .field("access", &(self.value.get_bit(10)))
-                .field("not_global", &(self.value.get_bit(11)))
-                .finish()
-        }
-    }
-}
-
-impl<L: Copy> PageTableDescriptor<L> {
-    pub const fn zero() -> PageTableDescriptor<L> {
-        PageTableDescriptor {
-            value: 0,
-            level: PhantomData,
-        }
-    }
-
-    pub const fn new_unchecked(value: u64) -> PageTableDescriptor<L> {
-        PageTableDescriptor {
-            value,
-            level: PhantomData,
-        }
-    }
-
-    pub const fn new(phys: usize, flags: DescriptorFlags) -> PageTableDescriptor<L> {
-        PageTableDescriptor {
-            value: (phys as u64) | flags.bits() | 1,
-            level: PhantomData,
-        }
-    }
-
-    pub fn is_unused(self) -> bool {
-        (self.value & 1) == 0
-    }
-
-    fn set_unused(&mut self) {
-        self.value = 0;
-    }
-
-    fn is_block_mem(self) -> bool {
-        !DescriptorFlags::from_bits_truncate(self.value).contains(DescriptorFlags::PAGE_TABLE_FLAG)
-    }
-
-    fn is_table_ptr(self) -> bool {
-        (self.value >> 1) & 1 == 1
-    }
-
-    fn block_attrs(self) -> Option<BlockAttributes> {
-        if self.is_block_mem() {
-            Some(BlockAttributes {})
-        } else {
-            None
-        }
-    }
-
-    fn address(self) -> u64 {
-        self.value & 0x0000_7FFF_FFFF_F000
-    }
-}
-
-impl<L: PageTableLevelHasNext> PageTableDescriptor<L> {
-    fn get_table(self) -> Result<*mut PageTable<L::Next>, ()> {
-        if self.is_table_ptr() {
-            let ptr: u64 = self.value & 0x0000_FFFF_FFFF_F000;
-            Ok(ptr as *mut PageTable<L::Next>)
-        } else {
-            Err(())
-        }
-    }
-
-    unsafe fn ensure_table(
-        &mut self,
-        tables: &mut [PageTable<L::Next>],
-        virt_addr: usize,
-    ) -> Result<*mut PageTable<L::Next>, ()> {
-        self.get_table().or_else(move |()| {
-            let new_table = get_table_for_virt::<L::Next>(tables, virt_addr)?;
-            *self = PageTableDescriptor::new(
-                new_table as *mut PageTable<L::Next> as usize,
-                DescriptorFlags::PAGE_TABLE_FLAG,
-            );
-            Ok(new_table)
-        })
-    }
-}
-
-pub struct BlockAttributes {}
+pub const PAGE_SHIFT: usize = 12;
+pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
 
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -294,7 +70,7 @@ impl Step for PageTableIndex {
     }
 }
 
-#[repr(transparent)]
+#[repr(C, align(4096))]
 pub struct PageTable<L> {
     entries: [PageTableDescriptor<L>; ENTRY_COUNT],
     level: PhantomData<L>,
@@ -303,7 +79,7 @@ pub struct PageTable<L> {
 impl<L: Copy> PageTable<L> {
     pub const fn new() -> PageTable<L> {
         PageTable {
-            entries: [PageTableDescriptor::new(0, DescriptorFlags::empty()); ENTRY_COUNT],
+            entries: [PageTableDescriptor::zero(); ENTRY_COUNT],
             level: PhantomData,
         }
     }
@@ -327,29 +103,49 @@ impl<L: Copy> PageTable<L> {
     }
 }
 
+// `bytes` must be a power of 2.
 #[inline]
-fn align_down(addr: usize, bytes: usize) -> usize {
-    let mask = !((1 << bytes) - 1);
+pub fn align_down(addr: usize, bytes: usize) -> usize {
+    let leading_zeros = bytes.leading_zeros() as usize;
+    let bits = 64 - leading_zeros;
+    align_down_bits(addr, bits)
+}
+
+// `bytes` must be a power of 2.
+#[inline]
+pub fn align_up(addr: usize, bytes: usize) -> usize {
+    let leading_zeros = bytes.leading_zeros() as usize;
+    let bits = 64 - leading_zeros;
+    align_up_bits(addr, bits)
+}
+
+#[inline]
+pub fn align_down_bits(addr: usize, bits: usize) -> usize {
+    let mask = !((1 << bits) - 1);
     addr & mask
 }
 
 #[inline]
-fn align_up(addr: usize, bytes: usize) -> usize {
-    align_down(addr + bytes, bytes)
+pub fn align_up_bits(addr: usize, bits: usize) -> usize {
+    align_down_bits(addr + (1 << bits), bits)
 }
 
+// const UPPER_SIZE: usize = 1 << Upper::SHIFT;
+const MIDDLE_SIZE: usize = 1 << Middle::SHIFT;
+const BOTTOM_SIZE: usize = 1 << Bottom::SHIFT;
+
 #[inline(never)]
-pub unsafe fn map_memory(
-    tables: &mut PageTables,
+pub unsafe fn map_memory<'a>(
+    tables: &'a mut PageTables<'_>,
     phys_addr_start: usize,
     mut virt_addr_start: usize,
     virt_addr_end: usize,
     flags: DescriptorFlags,
 ) -> Result<(), ()> {
     // Align start down and end up to page size.
-    let phys_addr_start = align_down(phys_addr_start, PAGE_SHIFT);
-    let virt_addr_start = align_down(virt_addr_start, PAGE_SHIFT);
-    let virt_addr_end = align_up(virt_addr_end, PAGE_SHIFT);
+    let phys_addr_start = align_down_bits(phys_addr_start, PAGE_SHIFT);
+    let virt_addr_start = align_down_bits(virt_addr_start, PAGE_SHIFT);
+    let virt_addr_end = align_up_bits(virt_addr_end, PAGE_SHIFT);
 
     // println!(
     //     "Attempting to map physical memory starting at {:#016x} to range {:#016x}-{:#016x}.",
@@ -358,10 +154,6 @@ pub unsafe fn map_memory(
 
     let mut phys_addr = phys_addr_start;
     let mut virt_addr = virt_addr_start;
-
-    // const UPPER_SIZE: usize = 1 << Upper::SHIFT;
-    const MIDDLE_SIZE: usize = 1 << Middle::SHIFT;
-    const BOTTOM_SIZE: usize = 1 << Bottom::SHIFT;
 
     // println!(
     //     "Global page table address: {:p}",
@@ -380,52 +172,63 @@ pub unsafe fn map_memory(
         //     "There are {:#x} bytes left to map, from {:#016x}-{:#016x}",
         //     size, virt_addr, virt_addr_end
         // );
-        let global_index = (virt_addr >> Global::SHIFT) & (ENTRY_COUNT - 1);
-        let global_descriptor = &mut tables.global[global_index];
-        // let upper: &mut PageTable<Upper> =
-        //     &mut *global_descriptor.ensure_table(tables.upper, virt_addr)?;
-        // if size >= UPPER_SIZE {
-        //     upper.map_memory_block(phys_addr, virt_addr, flags);
-        //     virt_addr += UPPER_SIZE;
-        //     phys_addr += UPPER_SIZE;
-        //     continue;
-        // }
-
-        // let upper_index = (virt_addr >> Upper::SHIFT) & (ENTRY_COUNT - 1);
-        // let upper_descriptor = &mut upper[upper_index];
-        let middle: &mut PageTable<Middle> =
-            &mut *global_descriptor.ensure_table(tables.middle, virt_addr)?;
-        // println!(
-        //     "For addr {:#016x}, upper: {:p}, middle: {:p}",
-        //     virt_addr, upper as *mut _, middle as *mut _
-        // );
-        if size >= MIDDLE_SIZE {
-            middle.map_memory_block(phys_addr, virt_addr, flags);
-            virt_addr += MIDDLE_SIZE;
-            phys_addr += MIDDLE_SIZE;
-            continue;
-        }
-        let middle_index = (virt_addr >> Middle::SHIFT) & (ENTRY_COUNT - 1);
-        let middle_descriptor = &mut middle[middle_index];
-        let bottom: &mut PageTable<Bottom> =
-            &mut *middle_descriptor.ensure_table(tables.bottom, virt_addr)?;
-        bottom.map_memory_block(
-            phys_addr,
-            virt_addr,
-            flags | DescriptorFlags::PAGE_TABLE_FLAG,
-        );
-        virt_addr += BOTTOM_SIZE;
-        phys_addr += BOTTOM_SIZE;
+        map_memory_inner(tables, size, &mut virt_addr, &mut phys_addr, flags);
     }
     Ok(())
 }
 
-// Safety:
-// * `phys_addr` and `virt_addr` must be 4K page aligned.
-unsafe fn get_table_for_virt<L: PageTableLevel>(
-    tables: &mut [PageTable<L>],
+unsafe fn map_memory_inner<'b>(
+    tables: &'b mut PageTables<'_>,
+    size: usize,
+    virt_addr: &mut usize,
+    phys_addr: &mut usize,
+    flags: DescriptorFlags,
+) {
+    let global_index = (*virt_addr >> Global::SHIFT) & (ENTRY_COUNT - 1);
+    let global_descriptor = &mut tables.global[global_index];
+    // let upper: &mut PageTable<Upper> =
+    //     &mut *global_descriptor.ensure_table(tables.upper, virt_addr);
+    // if size >= UPPER_SIZE {
+    //     upper.map_memory_block(*phys_addr, *virt_addr, flags);
+    //     *virt_addr += UPPER_SIZE;
+    //     *phys_addr += UPPER_SIZE;
+    //     return Ok(());
+    // }
+
+    // let upper_index = (*virt_addr >> Upper::SHIFT) & (ENTRY_COUNT - 1);
+    // let upper_descriptor = &mut upper[upper_index];
+    let middle: *mut PageTable<Middle> =
+        global_descriptor.ensure_table(&mut tables.middle, *virt_addr);
+    // println!(
+    //     "For addr {:#016x}, upper: {:p}, middle: {:p}",
+    //     virt_addr, upper as *mut _, middle as *mut _
+    // );
+    let middle = &mut *middle;
+    if size >= MIDDLE_SIZE {
+        middle.map_memory_block(*phys_addr, *virt_addr, flags);
+        *virt_addr += MIDDLE_SIZE;
+        *phys_addr += MIDDLE_SIZE;
+        return;
+    }
+    let middle_index = (*virt_addr >> Middle::SHIFT) & (ENTRY_COUNT - 1);
+    let middle_descriptor = &mut middle[middle_index];
+    let bottom: *mut PageTable<Bottom> =
+        middle_descriptor.ensure_table(&mut tables.bottom, *virt_addr);
+    let bottom = &mut *bottom;
+    bottom.map_memory_block(
+        *phys_addr,
+        *virt_addr,
+        flags | DescriptorFlags::PAGE_TABLE_FLAG,
+    );
+    *virt_addr += BOTTOM_SIZE;
+    *phys_addr += BOTTOM_SIZE;
+}
+
+fn get_table_for_virt<'a, L: PageTableLevel>(
+    tables: &'a mut Vec<Box<PageTable<L>>>,
     virt_addr: usize,
-) -> Result<&mut PageTable<L>, ()> {
+) -> &'a mut PageTable<L> {
+    let virt_addr = align_down_bits(virt_addr, PAGE_SHIFT);
     // Do the dumb thing and allocate a new table on any conflict. An
     // optimization later would be to follow the chain and only allocate a new
     // table if a table pointing to another slot doesn't work deeper in.
@@ -435,21 +238,19 @@ unsafe fn get_table_for_virt<L: PageTableLevel>(
     //     core::any::type_name::<L>(),
     //     descriptor_index
     // );
-    let mut table_index: Option<usize> = None;
-    for (i, table) in tables.iter().enumerate() {
-        if table[descriptor_index].is_unused() {
-            // println!("\tFound match at tables index {}", i);
-            table_index = Some(i);
-            break;
+    for table_ref in tables.iter_mut() {
+        if table_ref.is_unused() {
+            &mut *table_ref;
         }
     }
-    match table_index {
-        Some(i) => Ok(&mut tables[i]),
-        None => Err(()),
-    }
+    // No valid table found, so make a new one.
+    let table = Box::new(PageTable::new());
+    let index = tables.len();
+    tables.push(table);
+    &mut *tables[index]
 }
 
-impl<L: PageTableLevel> PageTable<L> {
+impl<L: PageTableLevel1Through3> PageTable<L> {
     #[inline(never)]
     fn map_memory_block(&mut self, phys_addr: usize, virt_addr: usize, flags: DescriptorFlags) {
         let index = L::table_index(virt_addr);
@@ -458,32 +259,29 @@ impl<L: PageTableLevel> PageTable<L> {
         //     "Mapping virtual address {:#016x} to physical address {:#016x} in {} table {:p} slot {:?}",
         //     virt_addr, phys_addr, core::any::type_name::<L>(), self as *mut PageTable<L>, index
         // );
-        let descriptor = PageTableDescriptor::new(phys_addr, flags);
+        let descriptor = PageTableDescriptor::<L>::new_block_mem_with_flags(phys_addr, flags);
         self[index] = descriptor;
     }
 }
 
 impl<L: PageTableLevelHasNext> PageTable<L> {
     #[inline(never)]
-    pub fn create_table_entry(&mut self, next: &PageTable<L::Next>, virt_addr: usize) {
+    pub fn create_table_entry(&mut self, next: *const PageTable<L::Next>, virt_addr: usize) {
         let index = L::table_index(virt_addr);
-        let descriptor = PageTableDescriptor::new(
-            next as *const PageTable<L::Next> as usize,
-            DescriptorFlags::PAGE_TABLE_FLAG,
-        );
+        let descriptor = PageTableDescriptor::new_page_table(next as usize);
         self[index] = descriptor;
     }
 }
 
-impl PageTable<Unknown> {
-    pub unsafe fn as_typed<L: PageTableLevel>(&self) -> &PageTable<L> {
-        core::mem::transmute(self)
-    }
+// impl PageTable<Unknown> {
+//     pub unsafe fn as_typed<L: PageTableLevel>(&self) -> &PageTable<L> {
+//         core::mem::transmute(self)
+//     }
 
-    pub unsafe fn as_typed_mut<L: PageTableLevel>(&mut self) -> &mut PageTable<L> {
-        core::mem::transmute(self)
-    }
-}
+//     pub unsafe fn as_typed_mut<L: PageTableLevel>(&mut self) -> &mut PageTable<L> {
+//         core::mem::transmute(self)
+//     }
+// }
 
 impl<L> Index<usize> for PageTable<L> {
     type Output = PageTableDescriptor<L>;
