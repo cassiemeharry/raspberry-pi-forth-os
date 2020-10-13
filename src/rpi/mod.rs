@@ -12,6 +12,7 @@ cfg_if! {
     }
 }
 
+#[cfg(feature = "semihosting")]
 pub mod semihosting;
 pub mod uart;
 pub mod usb;

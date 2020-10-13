@@ -250,48 +250,60 @@ msr cpacr_el1, $0"
     asm!("mrs $0, sctlr_el1" : "=r"(sctlr_el1_after));
     println!("SCTLR_EL1 {:016X} ", sctlr_el1_after);
 
-    let pc: usize;
-    asm!("adr $0, ." : "=r"(pc));
-    let example_input_addresses: [*const u32; 10] = [
-        ((create_page_tables as *const u32 as usize) | 0xFFFF_FFFF_0000_0000) as *const u32,
-        ((create_page_tables as *const u32 as usize) | 0xFFFF_FFF0_0000_0000) as *const u32,
-        ((create_page_tables as *const u32 as usize) | 0xFFFF_FF00_0000_0000) as *const u32,
-        ((create_page_tables as *const u32 as usize) | 0xFFFF_F000_0000_0000) as *const u32,
-        ((create_page_tables as *const u32 as usize) | 0xFFFF_0000_0000_0000) as *const u32,
-        create_page_tables as *const u32,
-        // ((global_page_tables().as_ptr() as usize) | 0xFFFF_FFFF_0000_0000) as *const u32,
-        ((&BSS_START as *const _ as *const u32 as usize) | 0xFFFF_FFFF_0000_0000) as *const u32,
-        crate::rpi::mmio::P_BASE as *const u32,
-        crate::rpi::mmio::P_BASE_PHYSICAL_ADDR as *const u32,
-        pc as *const u32,
-    ];
-    for input_address in example_input_addresses.iter() {
-        let input_address: *const u32 = *input_address;
-        let par_el1: usize;
-        asm!("
+    // let pc: usize;
+    // asm!("adr $0, ." : "=r"(pc));
+    // let example_input_addresses: [(&str, *const u32); 5] = [
+    //     ("create_page_tables", create_page_tables as *const u32),
+    //     (
+    //         "BSS_START (VA)",
+    //         ((&BSS_START as *const _ as *const u32 as usize) | 0xFFFF_FFFF_0000_0000) as *const u32,
+    //     ),
+    //     ("P_BASE (VA)", crate::rpi::mmio::P_BASE as *const u32),
+    //     (
+    //         "P_BASE (PA)",
+    //         crate::rpi::mmio::P_BASE_PHYSICAL_ADDR as *const u32,
+    //     ),
+    //     ("pc (VA)", pc as *const u32),
+    // ];
+    // for (label, input_address) in example_input_addresses.iter() {
+    //     show_translated_address(label, *input_address);
+    // }
+
+    // for i in 0..=32 {
+    //     let high_bits: usize = if i == 32 { 0 } else { 0xFFFF_FFFF << (i + 32) };
+    //     let addr = crate::rpi::mmio::P_BASE_PHYSICAL_ADDR | high_bits;
+    //     show_translated_address(
+    //         &alloc::format!("P_BASE with {} high bits set", 32 - i),
+    //         addr as *const u32,
+    //     );
+    // }
+}
+
+unsafe fn show_translated_address(label: &str, input_address: *const u32) {
+    let par_el1: usize;
+    asm!("
 AT S1E1R, $1
 mrs $0, PAR_EL1
 " : "=r"(par_el1) : "r"(input_address));
-        use bit_field::BitField;
-        let par_el1_failed = par_el1.get_bit(0);
-        if par_el1_failed {
-            let par_el1_stage = par_el1.get_bits(9..=9) + 1;
-            let par_el1_page_table_walk = par_el1.get_bit(8);
-            // DFSC, see D13-2946
-            let par_el1_fault_status_code = par_el1.get_bits(1..=6);
-            println!(
-                "Failed to translate address {:016p}\n\tStage: {}\tPTW: {:?}\tFault status code: 0b{:05b}",
-                input_address, par_el1_stage, par_el1_page_table_walk, par_el1_fault_status_code
+    use bit_field::BitField;
+    let par_el1_failed = par_el1.get_bit(0);
+    if par_el1_failed {
+        let par_el1_stage = par_el1.get_bits(9..=9) + 1;
+        let par_el1_page_table_walk = par_el1.get_bit(8);
+        // DFSC, see D13-2946
+        let par_el1_fault_status_code = par_el1.get_bits(1..=6);
+        println!(
+                "{:<30} | Failed to translate address {:018p}\t(stage: {}, PTW: {:?}, fault status code: 0b{:06b})",
+                label, input_address, par_el1_stage, par_el1_page_table_walk, par_el1_fault_status_code
             );
-        } else {
-            let par_el1_sh = par_el1.get_bits(7..=8);
-            let par_el1_ns = par_el1.get_bit(9);
-            let output_address = (par_el1.get_bits(12..=47) << 12) as *const u8;
-            println!(
-                "Successfully translated address {:016p} to {:016p}\n\tSH: 0b{:02b}\tNS: {:?}",
-                input_address, output_address, par_el1_sh, par_el1_ns
-            );
-        }
+    } else {
+        let par_el1_sh = par_el1.get_bits(7..=8);
+        let par_el1_ns = par_el1.get_bit(9);
+        let output_address = (par_el1.get_bits(12..=47) << 12) as *const u8;
+        println!(
+            "{:<30} | Successfully translated address {:018p} to {:018p}\n\tSH: 0b{:02b}\tNS: {:?}",
+            label, input_address, output_address, par_el1_sh, par_el1_ns
+        );
     }
 }
 

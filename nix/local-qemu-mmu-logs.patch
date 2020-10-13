@@ -1,0 +1,114 @@
+diff --git a/target/arm/helper.c b/target/arm/helper.c
+index 0bf8f53d4b..033d6b8d7c 100644
+--- a/target/arm/helper.c
++++ b/target/arm/helper.c
+@@ -6,6 +6,8 @@
+  * SPDX-License-Identifier: GPL-2.0-or-later
+  */
+ 
++#include <stdlib.h>
++
+ #include "qemu/osdep.h"
+ #include "qemu/units.h"
+ #include "target/arm/idau.h"
+@@ -9601,6 +9603,10 @@ static bool get_phys_addr_lpae(CPUARMState *env, target_ulong address,
+         if (-top_bits != param.select || (param.select && !ttbr1_valid)) {
+             /* The gap between the two regions is a Translation fault */
+             fault_type = ARMFault_Translation;
++            qemu_log_mask(CPU_LOG_MMU,
++                          "Got fault in get_phys_addr_lpae, gap between two regions\n"
++                          "\tfault_type = %d, level = %d\n",
++                          (int)fault_type, (int)level);
+             goto do_fault;
+         }
+     }
+@@ -9630,6 +9636,10 @@ static bool get_phys_addr_lpae(CPUARMState *env, target_ulong address,
+         /* Translation table walk disabled => Translation fault on TLB miss
+          * Note: This is always 0 on 64-bit EL2 and EL3.
+          */
++        qemu_log_mask(CPU_LOG_MMU,
++                      "Got fault in get_phys_addr_lpae, translation table walk disabled and TLB miss\n"
++                      "\tfault_type = %d, level = %d\n",
++                      (int)fault_type, (int)level);
+         goto do_fault;
+     }
+ 
+@@ -9646,6 +9656,9 @@ static bool get_phys_addr_lpae(CPUARMState *env, target_ulong address,
+          * = 4 - (inputsize - 4) / stride;
+          */
+         level = 4 - (inputsize - 4) / stride;
++        qemu_log_mask(CPU_LOG_MMU,
++                      "Got level %d in get_phys_addr_lpae from inputsize %d, stride %d\n",
++                      level, inputsize, stride);
+     } else {
+         /* For stage 2 translations the starting level is specified by the
+          * VTCR_EL2.SL0 field (whose interpretation depends on the page size)
+@@ -9667,6 +9680,10 @@ static bool get_phys_addr_lpae(CPUARMState *env, target_ulong address,
+                                 inputsize, stride);
+         if (!ok) {
+             fault_type = ARMFault_Translation;
++            qemu_log_mask(CPU_LOG_MMU,
++                          "Got fault in get_phys_addr_lpae, check_s2_mmu_setup failed\n"
++                          "\tfault_type = %d, level = %d\n",
++                          (int)fault_type, (int)level);
+             goto do_fault;
+         }
+         level = startlevel;
+@@ -9702,14 +9719,26 @@ static bool get_phys_addr_lpae(CPUARMState *env, target_ulong address,
+         nstable = extract32(tableattrs, 4, 1);
+         descriptor = arm_ldq_ptw(cs, descaddr, !nstable, mmu_idx, fi);
+         if (fi->type != ARMFault_None) {
++            qemu_log_mask(CPU_LOG_MMU,
++                          "Got fault in get_phys_addr_lpae after arm_ldq_ptw in main loop\n"
++                          "\tfault_type = %d, level = %d\n",
++                          (int)fault_type, (int)level);
+             goto do_fault;
+         }
+ 
+         if (!(descriptor & 1) ||
+             (!(descriptor & 2) && (level == 3))) {
+             /* Invalid, or the Reserved level 3 encoding */
++            qemu_log_mask(CPU_LOG_MMU,
++                          "Got fault in get_phys_addr_lpae, got bad descriptor in main loop\n"
++                          "\tfault_type = %d, level = %d, descriptor = 0x%lx\n"
++                          "\tdescaddr = 0x%lx, nstable = 0x%x\n",
++                          (int)fault_type, (int)level, descriptor, descaddr, nstable);
+             goto do_fault;
+         }
++        qemu_log_mask(CPU_LOG_MMU,
++                      "Got descriptor 0x%lx at level %d in get_phys_addr_lpae main loop\n",
++                      descriptor, (int)level);
+         descaddr = descriptor & descaddrmask;
+ 
+         if ((descriptor & 2) && (level < 3)) {
+@@ -9758,6 +9787,10 @@ static bool get_phys_addr_lpae(CPUARMState *env, target_ulong address,
+     fault_type = ARMFault_AccessFlag;
+     if ((attrs & (1 << 8)) == 0) {
+         /* Access flag */
++        qemu_log_mask(CPU_LOG_MMU,
++                      "Got fault in get_phys_addr_lpae, descriptor access flag is off\n"
++                      "\tfault_type = %d, level = %d, attrs = 0x%x\n",
++                      (int)fault_type, (int)level, attrs);
+         goto do_fault;
+     }
+ 
+@@ -9775,6 +9808,11 @@ static bool get_phys_addr_lpae(CPUARMState *env, target_ulong address,
+ 
+     fault_type = ARMFault_Permission;
+     if (!(*prot & (1 << access_type))) {
++        qemu_log_mask(CPU_LOG_MMU,
++                      "Got fault in get_phys_addr_lpae, memory protection access type mismatch\n"
++                      "\tfault_type = %d, level = %d, prot = 0x%x, wanted = 0x%x\n",
++                      (int)fault_type, (int)level,
++                      *prot, (1 << access_type));
+         goto do_fault;
+     }
+ 
+@@ -9813,6 +9851,7 @@ do_fault:
+     fi->level = level;
+     /* Tag the error as S2 for failed S1 PTW at S2 or ordinary S2.  */
+     fi->stage2 = fi->s1ptw || (mmu_idx == ARMMMUIdx_S2NS);
++    exit(1);
+     return true;
+ }
+ 

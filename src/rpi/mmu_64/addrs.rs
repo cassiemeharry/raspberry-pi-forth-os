@@ -25,9 +25,8 @@ impl VirtAddr {
     #[inline(always)]
     #[cfg(target_pointer_width = "64")]
     pub fn new(addr: u64) -> VirtAddr {
-        Self::try_new(addr).expect(
-            "address passed to VirtAddr::new must not contain any data in bits 48-64"
-        )
+        Self::try_new(addr)
+            .expect("address passed to VirtAddr::new must not contain any data in bits 48-64")
     }
 
     #[inline(always)]

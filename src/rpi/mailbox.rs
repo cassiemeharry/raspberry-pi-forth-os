@@ -4,6 +4,7 @@ use core::{
     fmt, mem, ops, slice,
     sync::atomic::{fence, Ordering},
 };
+use field_offset::offset_of;
 
 use super::mmu::align_up;
 
@@ -73,12 +74,21 @@ unsafe fn read_mailbox(channel: u8) -> u32 {
 
     // println!("Reading mailbox (want channel {})", channel);
 
+    let mut limit = 10;
     loop {
+        let mut empty_limit = 10;
         loop {
             fence(Ordering::SeqCst);
             if read_reg(MAIL_BASE, MAILBOX_OFFFSETS.status) & MAIL_EMPTY == 0 {
                 break;
             }
+            if empty_limit == 0 {
+                panic!(
+                    "Gave up waiting for mail when reading from mailbox (channel {})",
+                    channel
+                );
+            }
+            empty_limit -= 1;
         }
         fence(Ordering::SeqCst);
         let data: u32 = read_reg(MAIL_BASE, MAILBOX_OFFFSETS.read);
@@ -90,6 +100,13 @@ unsafe fn read_mailbox(channel: u8) -> u32 {
         // );
         if read_channel != channel {
             // println!("Wrong channel, trying again...");
+            if limit == 0 {
+                panic!(
+                    "Got trampled too many times when reading from mailbox (channel {})",
+                    channel
+                );
+            }
+            limit -= 1;
             continue;
         }
         return data;
@@ -101,12 +118,20 @@ unsafe fn write_mailbox(channel: u8, data: u32) {
     // 2. Write the data (shifted into the upper 28 bits) combined with the
     //    channel (in the lower four bits) to the write register.
     // println!("Writing {:#8x} to mailbox channel {}", data, channel);
+    let mut limit = 10;
     loop {
         // Wait for space
         fence(Ordering::SeqCst);
         if read_reg(MAIL_BASE, MAILBOX_OFFFSETS.status + 0x20) & MAIL_FULL == 0 {
             break;
         }
+        if limit == 0 {
+            panic!(
+                "Gave up waiting for space to write to mailbox (channel {}, data: 0x{:08x})",
+                channel, data
+            );
+        }
+        limit -= 1;
     }
     write_reg(MAIL_BASE, MAILBOX_OFFFSETS.write, data | (channel as u32));
     fence(Ordering::SeqCst);
@@ -129,16 +154,16 @@ macro_rules! impl_ptl {
 }
 
 impl<T: Sized> PropertyTagList for PropertyMessage<T> {}
-impl_ptl!(T1);
-impl_ptl!(T1, T2);
-impl_ptl!(T1, T2, T3);
-impl_ptl!(T1, T2, T3, T4);
-impl_ptl!(T1, T2, T3, T4, T5);
-impl_ptl!(T1, T2, T3, T4, T5, T6);
-impl_ptl!(T1, T2, T3, T4, T5, T6, T7);
-impl_ptl!(T1, T2, T3, T4, T5, T6, T7, T8);
-impl_ptl!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
-impl_ptl!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
+// impl_ptl!(T1);
+// impl_ptl!(T1, T2);
+// impl_ptl!(T1, T2, T3);
+// impl_ptl!(T1, T2, T3, T4);
+// impl_ptl!(T1, T2, T3, T4, T5);
+// impl_ptl!(T1, T2, T3, T4, T5, T6);
+// impl_ptl!(T1, T2, T3, T4, T5, T6, T7);
+// impl_ptl!(T1, T2, T3, T4, T5, T6, T7, T8);
+// impl_ptl!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+// impl_ptl!(T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
 
 #[repr(C, align(16))]
 #[derive(Debug)]
@@ -146,19 +171,22 @@ pub struct PropertyMessageWrapper<TL: PropertyTagList> {
     buffer_size: u32,
     code: u32,
     tags: TL,
-    end: u32,
+    // extra: [u32; 10],
 }
 
 impl<TL: PropertyTagList> PropertyMessageWrapper<TL> {
     #[inline]
     fn new(tags: TL) -> Self {
+        // let extra_offset = offset_of!(Self => extra).get_byte_offset();
+        // assert!(extra_offset % 4 == 0);
+	let buffer_size = core::mem::size_of::<Self>();
         PropertyMessageWrapper {
-            buffer_size: mem::size_of::<Self>()
+            buffer_size: buffer_size
                 .try_into()
                 .expect("Property message list size in bytes is too big to fit in a u32"),
             code: 0x0000_0000,
             tags,
-            end: 0x0000_0000,
+            // extra: [0; 10],
         }
     }
 
@@ -179,35 +207,37 @@ impl<TL: PropertyTagList> PropertyMessageWrapper<TL> {
         //     self.as_quads()
         // );
         const CHANNEL: u8 = Channel::PropertyTagsSend as u8;
+        println!("sending message {:x?}", self);
         unsafe {
             let ptr = self as *const Self;
             let addr = ptr as usize;
             write_mailbox(CHANNEL, addr.try_into().ok()?);
             let resp_addr = read_mailbox(CHANNEL);
-            // let resp_ptr = resp_addr as *const u32;
-            // println!("Got response from mailbox: {:#?}", &*resp_ptr);
-            // let resp_code: u32 = *resp_ptr.offset(1);
-            // println!(
-            //     "Property message after response {:#8x}: {:#x?}",
-            //     resp_addr, self
-            // );
-            // {
-            //     let message_quads = self.as_quads();
-            //     println!("Property message words: {:#x?}", message_quads);
-            // }
-            if self.code != 0x8000_0000 {
-                return None;
-            }
-            // let msg_ptr = resp_ptr.offset(2);
-
-            // let value_buffer_size_ptr = msg_ptr.offset(1);
-            // let value_buffer_size = (*value_buffer_size_ptr) as usize;
-            // let value_buffer_ptr = msg_ptr.offset(3) as *const T;
-            // assert_eq!(value_buffer_size, mem::size_of::<T>());
-            // let value_ref = &*(value_buffer_ptr as *const T);
-            // Some(value_ref)
-            Some(&self.tags)
         }
+	// let resp_ptr = resp_addr as *const u32;
+	// println!("Got response from mailbox: {:#?}", &*resp_ptr);
+	// let resp_code: u32 = *resp_ptr.offset(1);
+	// println!(
+	//     "Property message after response {:#8x}: {:#x?}",
+	//     resp_addr, self
+	// );
+	// {
+	//     let message_quads = self.as_quads();
+	//     println!("Property message words: {:#x?}", message_quads);
+	// }
+	if self.code != 0x8000_0000 {
+	    return None;
+	}
+	// let msg_ptr = resp_ptr.offset(2);
+
+	// let value_buffer_size_ptr = msg_ptr.offset(1);
+	// let value_buffer_size = (*value_buffer_size_ptr) as usize;
+	// let value_buffer_ptr = msg_ptr.offset(3) as *const T;
+	// assert_eq!(value_buffer_size, mem::size_of::<T>());
+	// let value_ref = &*(value_buffer_ptr as *const T);
+	// Some(value_ref)
+	println!("received message: {:#x?}", self);
+	Some(&self.tags)
     }
 }
 
@@ -257,12 +287,25 @@ impl<T> PropertyMessage<T> {
         let buffer_size = align_up(mem::size_of::<T>(), 2)
             .try_into()
             .expect("Property message size is too big to fit in a u32");
-        PropertyMessage {
+        let msg = PropertyMessage {
             tag,
             buffer_size,
             code: 0,
             buffer,
-        }
+        };
+        let tag_offset = offset_of!(Self => tag);
+        assert_eq!(tag_offset.get_byte_offset(), 0);
+        let size_offset = offset_of!(Self => buffer_size);
+        assert_eq!(size_offset.get_byte_offset(), 4);
+        let code_offset = offset_of!(Self => code);
+        assert_eq!(code_offset.get_byte_offset(), 8);
+        let buffer_offset = offset_of!(Self => buffer);
+        assert_eq!(buffer_offset.get_byte_offset(), 12);
+        msg
+    }
+
+    pub fn value(&self) -> &T {
+        &self.buffer
     }
 }
 

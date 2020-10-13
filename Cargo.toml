@@ -20,8 +20,10 @@ bitfield = "0.13"
 bit_field = "0.10"
 cfg-if = "0.1"
 enum-repr = "0.2"
+field-offset = { path = "../../sources/rust-field-offset" }
 font8x8 = { version = "0.2", default-features = false, features = ["unicode"] }
-linked_list_allocator = "0.7"
+futures = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
+linked_list_allocator = "0.8"
 # panic-halt = "0.2"
 qemu-exit = "0.1"
 spin = "0.5"

@@ -1,4 +1,4 @@
-use super::{PAGE_SHIFT, PageTableIndex};
+use super::{PageTableIndex, PAGE_SHIFT};
 
 pub const TABLE_SHIFT: usize = 9;
 pub const TABLE_SIZE: usize = 1 << TABLE_SHIFT;

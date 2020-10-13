@@ -1,6 +1,6 @@
 use core::fmt;
 
-use super::{PageTable, Global};
+use super::{Global, PageTable};
 
 #[repr(transparent)]
 #[derive(Copy, Clone)]
@@ -53,10 +53,13 @@ impl<const N: usize, const L: usize> TTBR<N, L> {
 
 impl<const N: usize, const L: usize> From<*const PageTable<Global>> for TTBR<N, L> {
     fn from(table_ptr: *const PageTable<Global>) -> TTBR<N, L> {
-        const MASK: u64 = 0xFFFF_FFFF & !0b0111_1111;
+        const MASK: u64 = 0xFFFF_FFFF_FFFF & !0b0111_1111;
         let value = (table_ptr as u64) & MASK;
         if value != (table_ptr as u64) {
-            panic!("Global page table isn't properly aligned (got address {:p})", table_ptr);
+            panic!(
+                "Global page table isn't properly aligned (got address {:p})",
+                table_ptr
+            );
         }
         // println!("Original TTBR{}_EL{} value (from page table ref): {:#016x}", N, L, value);
         TTBR { value }
@@ -84,7 +87,8 @@ impl TTBR<1, 1> {
     }
 
     pub unsafe fn install(self) {
-        println!("Installing TTBR1_EL1 with value {:#016x}", self.value);
-        asm!("msr ttbr1_el1, $0" :: "r"(self.value) :: "volatile");
+        let value = self.value | 0xFFFF_0000_0000_0000;
+        println!("Installing TTBR1_EL1 with value {:#016x}", value);
+        asm!("msr ttbr1_el1, $0" :: "r"(value) :: "volatile");
     }
 }

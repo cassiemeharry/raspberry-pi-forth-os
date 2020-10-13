@@ -15,6 +15,7 @@ _start:
     cbz     x0, reset           // Hang for all non-primary CPU
 
 proc_hang:
+    wfi
     b       proc_hang
 
 reset:
@@ -40,10 +41,9 @@ reset:
 
 el1_entry:
     // Set a temporary stack pointer
-    mov     sp, 1 << 28
-
+    ldr     x0, =(0xFFFF_0000_0000_0000 | (1 << 28))
+    mov     sp, x0
     bl      __memory_init
-
     b       kernel_main
 
 ;;     ldr     x2, =kernel_main

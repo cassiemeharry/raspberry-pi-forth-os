@@ -131,8 +131,11 @@ fn lookup_codepoint(c: u32) -> Option<[u8; 8]> {
 pub struct Console {}
 
 impl Console {
-    pub fn new() -> Console {
-        Console {}
+    pub fn new() -> Option<Console> {
+        if !Framebuffer::ready() {
+            return None;
+        }
+        Some(Console {})
     }
 }
 

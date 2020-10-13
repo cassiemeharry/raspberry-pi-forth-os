@@ -1,7 +1,7 @@
-use alloc::{vec, boxed::Box, vec::Vec};
+use alloc::{boxed::Box, vec, vec::Vec};
 use spin::{Mutex, MutexGuard, Once};
 
-use super::{PageTable, levels::*};
+use super::{levels::*, PageTable};
 
 struct PageTablesOwned {
     global: Box<PageTable<Global>>,
@@ -20,7 +20,11 @@ impl PageTablesOwned {
             let global = Box::new(PageTable::new());
             let middle = Vec::with_capacity(4);
             let bottom = Vec::with_capacity(16);
-            let tables = PageTablesOwned { global, middle, bottom };
+            let tables = PageTablesOwned {
+                global,
+                middle,
+                bottom,
+            };
             Mutex::new(tables)
         });
         f(&mut mutex.lock())

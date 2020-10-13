@@ -66,16 +66,98 @@ dependencies = [
 ]
 
 [[package]]
+name = "field-offset"
+version = "0.2.0"
+dependencies = [
+ "rustc_version",
+]
+
+[[package]]
 name = "font8x8"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44226c40489fb1d602344a1d8f1b544570c3435e396dda1eda7b5ef010d8f1be"
 
 [[package]]
-name = "linked_list_allocator"
-version = "0.7.0"
+name = "futures"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "411991593f041990abf72f6715903fe67770e710e3c95a6d2e98a7550270136a"
+checksum = "5c329ae8753502fb44ae4fc2b622fa2a94652c41e795143765ba0927f92ab780"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
+name = "futures-channel"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0c77d04ce8edd9cb903932b608268b3fffec4163dc053b3b402bf47eac1f1a8"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+]
+
+[[package]]
+name = "futures-core"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f25592f769825e89b92358db00d26f965761e094951ac44d3663ef25b7ac464a"
+
+[[package]]
+name = "futures-io"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a638959aa96152c7a4cddf50fcb1e3fede0583b27157c26e67d6f99904090dc6"
+
+[[package]]
+name = "futures-macro"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a5081aa3de1f7542a794a397cde100ed903b0630152d0973479018fd85423a7"
+dependencies = [
+ "proc-macro-hack",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "futures-sink"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3466821b4bc114d95b087b850a724c6f83115e929bc88f1fa98a3304a944c8a6"
+
+[[package]]
+name = "futures-task"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b0a34e53cf6cdcd0178aa573aed466b646eb3db769570841fda0c7ede375a27"
+
+[[package]]
+name = "futures-util"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22766cf25d64306bedf0384da004d05c9974ab104fcc4528f1236181c18004c5"
+dependencies = [
+ "futures-core",
+ "futures-macro",
+ "futures-sink",
+ "futures-task",
+ "pin-utils",
+ "proc-macro-hack",
+ "proc-macro-nested",
+]
+
+[[package]]
+name = "linked_list_allocator"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18c618c431dfe4419afbe22852f6aceffbc17bd82ba0a18b982def291000824c"
 dependencies = [
  "spinning_top",
 ]
@@ -94,6 +176,29 @@ name = "nodrop"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
+
+[[package]]
+name = "pin-utils"
+version = "0.1.0-alpha.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5894c618ce612a3fa23881b152b608bafb8c56cfc22f434a3ba3120b40f7b587"
+
+[[package]]
+name = "proc-macro-hack"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecd45702f76d6d3c75a80564378ae228a85f0b59d2f3ed43c91b4a69eb2ebfc5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "proc-macro-nested"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "369a6ed065f249a159e06c45752c780bda2fb53c995718f9e484d08daa9eb42e"
 
 [[package]]
 name = "proc-macro2"
@@ -132,7 +237,9 @@ dependencies = [
  "byteorder",
  "cfg-if",
  "enum-repr",
+ "field-offset",
  "font8x8",
+ "futures",
  "linked_list_allocator",
  "qemu-exit",
  "spin",

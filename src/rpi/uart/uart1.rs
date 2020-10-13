@@ -1,6 +1,9 @@
-use core::{sync::atomic::{AtomicBool, Ordering}, fmt};
+use core::{
+    fmt,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
-use crate::rpi::mailbox;
+use crate::rpi::mailbox::{Channel, PropertyMessage, PropertyTagList};
 
 // pub const GET_CLOCK_STATE_TAG: u32 = 0x0003_0001;
 // pub const SET_CLOCK_STATE_TAG: u32 = 0x0003_8001;
@@ -37,16 +40,23 @@ unsafe fn uart1_init() {
     const GET_POWER_STATE_TAG: u32 = 0x0002_0001;
     const SET_POWER_STATE_TAG: u32 = 0x0002_8001;
     #[repr(C)]
+    #[derive(Debug)]
     struct IdInfo {
         id: u32,
         info: u32,
     }
 
-    let mut message = mailbox::Message::new(GET_POWER_STATE_TAG, IdInfo {
-        id: UART1_POWER,
-        info: 0,
-    });
-    let response = message.send(mailbox::Channel::Power).unwrap();
+    let mut message = PropertyMessage::new(
+        GET_POWER_STATE_TAG,
+        IdInfo {
+            id: UART1_POWER,
+            info: 0,
+        },
+    )
+    .prepare();
+    let response = message
+        .send()
+        .expect("Failed to initialize UART1 (get power state failed)");
     let exists = ((response.info >> 1) & 1) == 0;
     let powered_on = ((response.info >> 0) & 1) == 1;
     if !exists {
@@ -56,11 +66,17 @@ unsafe fn uart1_init() {
     if !powered_on {
         const ON: u32 = 1 << 0;
         const WAIT: u32 = 1 << 1;
-        let mut message = mailbox::Message::new(SET_POWER_STATE_TAG, IdInfo {
-            id: UART1_POWER,
-            info: ON | WAIT,
-        });
-        let response = message.send(mailbox::Channel::Power).unwrap();
+        let mut message = PropertyMessage::new(
+            SET_POWER_STATE_TAG,
+            IdInfo {
+                id: UART1_POWER,
+                info: ON | WAIT,
+            },
+        )
+        .prepare();
+        let response = message.send().unwrap();
+        let powered_on = ((response.info >> 0) & 1) == 1;
+        assert!(powered_on, "Failed to power on UART1: {:?}", **response);
     }
 
     // const GET_CLOCK_STATE_TAG: u32 = 0x0003_0001;

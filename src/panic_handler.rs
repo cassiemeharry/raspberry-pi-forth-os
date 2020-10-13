@@ -32,5 +32,8 @@ fn panic(info: &PanicInfo) -> ! {
         let _ = writeln!(out, "No message available");
     }
 
-    qemu_exit::aarch64::exit_failure()
+    #[cfg(feature = "semihosting")]
+    qemu_exit::aarch64::exit_failure();
+    #[cfg(not(feature = "semihosting"))]
+    loop {}
 }

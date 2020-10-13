@@ -109,24 +109,30 @@ pub enum DataFaultStatusCode {
 #[no_mangle]
 pub unsafe extern "C" fn handle_sync() {
     if SYNC_EXCS.fetch_add(1, Ordering::SeqCst) > 10 {
-        panic!("Got too many sync exceptions!");
+        println_semihosting!("Got too many sync exceptions!");
+        loop {}
     }
 
     let status = ExceptionStatus::load().expect("Failed to load exception status");
 
+    println_semihosting!("Got sync exception: {:#?}", status);
+
     match status.exception_class {
-        Err(class) => println!(
+        Err(class) => println_semihosting!(
             "Failed to decode exception class 0b{:6b} in exception: {:#?}",
-            class, status
+            class,
+            status
         ),
-        Ok(ExceptionClass::Unknown) => println!("Got unknown sync exception: {:#?}", status),
+        Ok(ExceptionClass::Unknown) => {
+            println_semihosting!("Got unknown sync exception: {:#?}", status);
+        }
         Ok(ExceptionClass::DataAbortFromSame) => {
             let was_write = status.iss.get_bit(6);
             let status_code_raw = status.iss.get_bits(0..=5) as u8;
             let status_code =
                 DataFaultStatusCode::from_repr(status_code_raw).ok_or(status_code_raw);
             if !status.iss.get_bit(24) {
-                println!(
+                println_semihosting!(
                     "Got data abort from same EL when accessing address {:p} ({}, {:?})",
                     status.fault_address,
                     if was_write { "write" } else { "read" },
@@ -151,7 +157,7 @@ pub unsafe extern "C" fn handle_sync() {
             let external_abort = status.iss.get_bit(9);
             let cache_maintenance = status.iss.get_bit(8);
             let s1ptw = status.iss.get_bit(7);
-            println!(
+            println_semihosting!(
                 "Got data abort from same EL accessing address {:p} ({} {}, {:?})",
                 status.fault_address,
                 access_size,
@@ -160,7 +166,7 @@ pub unsafe extern "C" fn handle_sync() {
             );
         }
         Ok(other) => {
-            println!("Got unhandled exception class {:?}: {:#?}", other, status);
+            println_semihosting!("Got unhandled exception class {:?}: {:#?}", other, status);
         }
     }
 }

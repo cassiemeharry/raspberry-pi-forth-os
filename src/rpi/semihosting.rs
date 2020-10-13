@@ -1,6 +1,6 @@
 use spin::{Mutex, MutexGuard};
 
-#[cfg(target_pointer_width = "64")]
+#[cfg(all(feature = "semihosting", target_pointer_width = "64"))]
 unsafe fn syscall(number: u8, parameter: usize) -> isize {
     let result: isize;
     asm!(
@@ -9,13 +9,18 @@ unsafe fn syscall(number: u8, parameter: usize) -> isize {
     result
 }
 
-#[cfg(target_pointer_width = "32")]
+#[cfg(all(feature = "semihosting", target_pointer_width = "32"))]
 unsafe fn syscall(number: u32, parameter: usize) -> isize {
     let result: isize;
     asm!(
         "hlt 0xF000" : "={r0}"(result) : "{r0}"(number), "{r1}"(parameter) :: "volatile"
     );
     result
+}
+
+#[cfg(not(feature = "semihosting"))]
+unsafe fn syscall(number: u32, parameter: usize) -> isize {
+    panic!("Attempted semihosting call {:?} with parameter {:?}", number, parameter)
 }
 
 fn check_init() -> Result<(), ()> {
@@ -81,35 +86,4 @@ fn sys_write0(bytes: &[u8]) {
     debug_assert_eq!(bytes[bytes.len() - 1], 0);
 
     let _result = unsafe { syscall(0x04, bytes.as_ptr() as usize) };
-}
-
-static SH_TTY_OUT: Mutex<Option<usize>> = Mutex::new(None);
-
-#[inline(never)]
-#[no_mangle]
-pub unsafe extern "C" fn puts(bytes: *const u8) -> i32 {
-    let mut len: isize = 0;
-    while *bytes.offset(len) != 0 {
-        len += 1;
-    }
-    let bytes = core::slice::from_raw_parts(bytes, len as usize);
-    match check_init() {
-        Ok(()) => (),
-        Err(()) => return -1,
-    };
-    let mut tty_lock = SH_TTY_OUT.lock();
-    let handle = match *tty_lock {
-        Some(handle) => handle,
-        None => {
-            match sys_open(b":tt\0", OpenMode::W) {
-                Some(handle) => {
-                    *tty_lock = Some(handle);
-                    handle
-                },
-                None => return -1,
-            }
-        }
-    };
-    sys_write0(bytes);
-    return len as i32;
 }

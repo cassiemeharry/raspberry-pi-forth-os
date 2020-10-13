@@ -3,7 +3,7 @@ use bit_field::BitField;
 use bitflags::bitflags;
 use core::{fmt, marker::PhantomData};
 
-use super::{PageTable, levels::*};
+use super::{levels::*, PageTable};
 
 bitflags! {
     pub struct DescriptorFlags: u64 {
@@ -155,15 +155,16 @@ impl<L: PageTableLevelHasNext> PageTableDescriptor<L> {
     {
         self.get_table().unwrap_or_else(move || {
             let new_table = super::get_table_for_virt(tables, virt_addr);
-            *self = PageTableDescriptor::new_page_table(
-                new_table as *mut PageTable<L::Next> as usize,
+            *self =
+                PageTableDescriptor::new_page_table(new_table as *mut PageTable<L::Next> as usize);
+            println!(
+                "Pointing desciptor {:?} at table {:p}",
+                self, new_table as *mut _
             );
-            println!("Pointing desciptor {:?} at table {:p}", self, new_table as *mut _);
             new_table
         })
     }
 }
-
 
 pub trait CanMapBlocks: Sized {
     fn new_block_mem_with_flags(phys: usize, flags: DescriptorFlags) -> Self;
@@ -173,7 +174,6 @@ pub trait CanMapBlocks: Sized {
     }
 }
 
-
 impl<L: PageTableLevel1Through3> CanMapBlocks for PageTableDescriptor<L> {
     default fn new_block_mem_with_flags(phys: usize, flags: DescriptorFlags) -> Self {
         PageTableDescriptor {
@@ -181,7 +181,6 @@ impl<L: PageTableLevel1Through3> CanMapBlocks for PageTableDescriptor<L> {
             level: PhantomData,
         }
     }
-
 }
 
 impl CanMapBlocks for PageTableDescriptor<Bottom> {

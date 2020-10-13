@@ -86,3 +86,71 @@ static ALLOC: MyAllocatorWrapper = MyAllocatorWrapper::new_uninit();
 fn handle_alloc_error(layout: Layout) -> ! {
     panic!("Failed to allocate from layout {:?}", layout)
 }
+
+static C_HEAP: Once<Mutex<BTreeMap<usize, Layout>>> = Once::new();
+
+#[inline]
+fn init_c_heap() -> Mutex<BTreeMap<usize, Layout>> {
+    let map = BTreeMap::new();
+    Mutex::new(map)
+}
+
+#[no_mangle]
+#[inline(never)]
+pub unsafe extern "C" fn malloc(size: usize) -> *mut u8 {
+    let align = size.next_power_of_two().max(8);
+    let layout =
+        Layout::from_size_align(size, align).expect("Failed to determine layout for malloc");
+    let ptr = ALLOC.alloc(layout);
+    if !ptr.is_null() {
+        let c_heap_mutex = C_HEAP.call_once(init_c_heap);
+        let mut c_heap = c_heap_mutex.lock();
+        c_heap.insert(ptr as usize, layout);
+    }
+    ptr
+}
+
+#[no_mangle]
+#[inline(never)]
+pub unsafe extern "C" fn free(ptr: *mut u8) {
+    let layout = {
+        let c_heap_mutex = C_HEAP.call_once(init_c_heap);
+        let mut c_heap = c_heap_mutex.lock();
+        c_heap
+            .remove(&(ptr as usize))
+            .expect("Double free detected in C code")
+    };
+    ALLOC.dealloc(ptr, layout)
+}
+
+// Other C helpers
+// TODO: find a better spot for these
+#[no_mangle]
+pub unsafe extern "C" fn get_unaligned_le16(ptr: *const u16) -> u16 {
+    core::ptr::read_unaligned(ptr)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn get_unaligned_le32(ptr: *const u32) -> u32 {
+    core::ptr::read_unaligned(ptr)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn get_unaligned_le64(ptr: *const u64) -> u64 {
+    core::ptr::read_unaligned(ptr)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn put_unaligned_le16(value: u16, ptr: *mut u16) {
+    ptr.write_unaligned(value)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn put_unaligned_le32(value: u32, ptr: *mut u32) {
+    ptr.write_unaligned(value)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn put_unaligned_le64(value: u64, ptr: *mut u64) {
+    ptr.write_unaligned(value)
+}

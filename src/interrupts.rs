@@ -6,7 +6,7 @@ pub mod handlers;
 
 #[repr(C)]
 struct InterruptHandler {
-    func_code: [u32; 32]
+    func_code: [u32; 32],
 }
 
 #[repr(C)]
@@ -63,7 +63,9 @@ where
         (ExceptionMask::A, &INT_MASK_LEVEL_A),
         (ExceptionMask::I, &INT_MASK_LEVEL_I),
         (ExceptionMask::F, &INT_MASK_LEVEL_F),
-    ].iter() {
+    ]
+    .iter()
+    {
         if MASK.contains(*flag) {
             let prev_mask_level = counter.fetch_add(1, Ordering::SeqCst);
             if prev_mask_level == 0 {
@@ -79,7 +81,9 @@ where
         (ExceptionMask::A, &INT_MASK_LEVEL_A),
         (ExceptionMask::I, &INT_MASK_LEVEL_I),
         (ExceptionMask::F, &INT_MASK_LEVEL_F),
-    ].iter() {
+    ]
+    .iter()
+    {
         if MASK.contains(*flag) {
             let prev_mask_level = counter.fetch_sub(1, Ordering::SeqCst);
             if prev_mask_level == 1 {
@@ -138,6 +142,7 @@ pub enum ExceptionClass {
 
 #[derive(Clone, Debug)]
 pub struct ExceptionStatus {
+    exception_syndrome: u32,
     level: u8,
     exception_class: Result<ExceptionClass, u16>,
     instr_is_quad: bool,
@@ -164,6 +169,7 @@ impl ExceptionStatus {
                 let exception_link: *mut ();
                 asm!("mrs $0, ELR_EL1" : "=r"(exception_link));
                 Some(ExceptionStatus {
+                    exception_syndrome,
                     level,
                     exception_class: ExceptionClass::from_repr(ec).ok_or(ec),
                     instr_is_quad: il == 1,
@@ -171,7 +177,7 @@ impl ExceptionStatus {
                     fault_address,
                     exception_link,
                 })
-            },
+            }
             2 => {
                 let exception_syndrome: u32;
                 asm!("mrs $0, ESR_EL2" : "=r"(exception_syndrome));
@@ -183,6 +189,7 @@ impl ExceptionStatus {
                 let exception_link: *mut ();
                 asm!("mrs $0, ELR_EL2" : "=r"(exception_link));
                 Some(ExceptionStatus {
+                    exception_syndrome,
                     level,
                     exception_class: ExceptionClass::from_repr(ec).ok_or(ec),
                     instr_is_quad: il == 1,
@@ -190,7 +197,7 @@ impl ExceptionStatus {
                     fault_address,
                     exception_link,
                 })
-            },
+            }
             3 => {
                 let exception_syndrome: u32;
                 asm!("mrs $0, ESR_EL3" : "=r"(exception_syndrome));
@@ -202,6 +209,7 @@ impl ExceptionStatus {
                 let exception_link: *mut ();
                 asm!("mrs $0, ELR_EL3" : "=r"(exception_link));
                 Some(ExceptionStatus {
+                    exception_syndrome,
                     level,
                     exception_class: ExceptionClass::from_repr(ec).ok_or(ec),
                     instr_is_quad: il == 1,
@@ -209,7 +217,7 @@ impl ExceptionStatus {
                     fault_address,
                     exception_link,
                 })
-            },
+            }
             _ => unreachable!(),
         }
     }
